@@ -337,7 +337,6 @@ dependencies = [
  "humantime 2.0.1",
  "ignore",
  "im-rc",
- "indexmap",
  "itertools",
  "jobserver",
  "lazy_static",
@@ -359,7 +358,6 @@ dependencies = [
  "serde_ignored",
  "serde_json",
  "shell-escape",
- "snapbox",
  "strip-ansi-escapes",
  "tar",
  "tempfile",
@@ -448,7 +446,6 @@ dependencies = [
  "lazy_static",
  "remove_dir_all",
  "serde_json",
- "snapbox",
  "tar",
  "termcolor",
  "toml_edit",
@@ -799,32 +796,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "concolor"
-version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "015267563b1df20adccdd00cb05257b1dfbea70a04928e9cf88ffb850c1a40af"
-dependencies = [
- "atty",
- "bitflags",
- "concolor-query",
-]
-
-[[package]]
-name = "concolor-query"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6417fe6fc03a8b533fd2177742eeb39a90c7233eedec7bac96d4d6b69a09449"
-
-[[package]]
-name = "content_inspector"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7bda66e858c683005a53a9a60c69a4aca7eeaa45d124526e389f7aec8e62f38"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "core"
 version = "0.0.0"
 dependencies = [
@@ -1118,12 +1089,6 @@ dependencies = [
  "libc",
  "rustc-std-workspace-core",
 ]
-
-[[package]]
-name = "dunce"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "453440c271cf5577fd2a40e4942540cb7d0d2f85e27c8d07dd0023c925a67541"
 
 [[package]]
 name = "either"
@@ -2043,11 +2008,11 @@ dependencies = [
 
 [[package]]
 name = "kstring"
-version = "2.0.0"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec3066350882a1cd6d950d055997f379ac37fd39f81cd4d8ed186032eb3c5747"
+checksum = "8b310ccceade8121d7d77fee406160e457c2f4e7c7982d589da3499bc7ea4526"
 dependencies = [
- "static_assertions",
+ "serde",
 ]
 
 [[package]]
@@ -2067,6 +2032,22 @@ name = "libc"
 version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
+dependencies = [
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "libc-nnsdk"
+version = "0.0.1"
+source = "git+https://github.com/inspier/libc-nnsdk#03ad16e9092631e26c589627330e21a61882b5f2"
+dependencies = [
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "libc-nnsdk"
+version = "0.0.1"
+source = "git+https://github.com/ultimate-research/libc-nnsdk.git#efed8f62261c993a30e909556ab73c4f191e26d5"
 dependencies = [
  "rustc-std-workspace-core",
 ]
@@ -2432,6 +2413,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 
 [[package]]
+name = "nnsdk"
+version = "0.1.0"
+source = "git+https://github.com/inspier/nnsdk-rs.git#9e0c1c2c28f1bf42f8595d030e61a6bf271d39c7"
+dependencies = [
+ "compiler_builtins",
+ "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk)",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2441,12 +2432,6 @@ dependencies = [
  "minimal-lexical",
  "version_check",
 ]
-
-[[package]]
-name = "normalize-line-endings"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
 
 [[package]]
 name = "ntapi"
@@ -2994,6 +2979,8 @@ dependencies = [
 [[package]]
 name = "racer"
 version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64954e44fc0d1dcc64e0b9f2b155249ad62849eba25354b76ae1598d1e8f0fa0"
 dependencies = [
  "bitflags",
  "clap 2.34.0",
@@ -3001,26 +2988,8 @@ dependencies = [
  "env_logger 0.7.1",
  "humantime 2.0.1",
  "lazy_static",
- "lazycell",
  "log",
- "racer-cargo-metadata",
  "rls-span",
-]
-
-[[package]]
-name = "racer-cargo-metadata"
-version = "0.1.2"
-dependencies = [
- "racer-interner",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "racer-interner"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -4821,12 +4790,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "similar"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e24979f63a11545f5f2c60141afe249d4f19f84581ea2138065e400941d83d3"
-
-[[package]]
 name = "siphasher"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4861,30 +4824,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da73c8f77aebc0e40c300b93f0a5f1bece7a248a36eee287d4e095f35c7b7d6e"
 
 [[package]]
-name = "snapbox"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1f212b806d6f56d19838e36a0aaa7e79a0bc9ca177e873fb87651ad92f983e2"
-dependencies = [
- "concolor",
- "content_inspector",
- "dunce",
- "filetime",
- "normalize-line-endings",
- "similar",
- "snapbox-macros",
- "tempfile",
- "walkdir",
- "yansi",
-]
-
-[[package]]
-name = "snapbox-macros"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c01dea7e04cbb27ef4c86e9922184608185f7cd95c1763bc30d727cda4a5e930"
-
-[[package]]
 name = "socket2"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4914,12 +4853,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "static_assertions"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
 name = "std"
 version = "0.0.0"
 dependencies = [
@@ -4933,7 +4866,9 @@ dependencies = [
  "hashbrown 0.12.0",
  "hermit-abi 0.2.0",
  "libc",
+ "libc-nnsdk 0.0.1 (git+https://github.com/ultimate-research/libc-nnsdk.git)",
  "miniz_oxide",
+ "nnsdk",
  "object 0.26.2",
  "panic_abort",
  "panic_unwind",
@@ -5329,9 +5264,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.14.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba98375fd631b83696f87c64e4ed8e29e6a1f3404d6aed95fa95163bad38e705"
+checksum = "744e9ed5b352340aa47ce033716991b5589e23781acb97cad37d4ea70560f55b"
 dependencies = [
  "combine",
  "indexmap",
@@ -5835,12 +5770,6 @@ checksum = "39f0c922f1a334134dc2f7a8b67dc5d25f0735263feec974345ff706bcf20b0d"
 dependencies = [
  "linked-hash-map",
 ]
-
-[[package]]
-name = "yansi"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
 
 [[package]]
 name = "yansi-term"
