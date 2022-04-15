@@ -145,13 +145,10 @@ pub mod solid;
 #[cfg(target_os = "vxworks")]
 pub mod vxworks;
 
-#[cfg(target_os = "switch")]
-pub mod switch;
-
 #[cfg(any(unix, target_os = "switch", target_os = "wasi", doc))]
 mod fd;
 
-#[cfg(doc)]
+#[cfg(all(doc, target_os = "switch"))]
 #[unstable(issue = "none", feature = "std_internals")]
 pub mod switch {
     pub mod ffi {
