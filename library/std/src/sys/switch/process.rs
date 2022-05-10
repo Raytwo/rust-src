@@ -6,12 +6,14 @@ use crate::path::Path;
 use crate::sys::pipe::AnonPipe;
 use crate::sys::{unsupported, Void};
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
-use crate::os::raw::NonZero_c_int;
 use crate::num::NonZeroI32;
 use crate::convert::TryInto;
 use core::ffi::NonZero_c_int;
 
 pub use crate::ffi::OsString as EnvKey;
+
+use libc::c_int;
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command

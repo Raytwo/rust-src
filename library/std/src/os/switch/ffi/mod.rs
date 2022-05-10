@@ -37,9 +37,3 @@ mod os_str;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::os_str::{OsStrExt, OsStringExt};
-
-#[stable(feature = "rust1", since = "1.0.0")]
-mod ffi {
-    #[stable(feature = "rust1", since = "1.0.0")]
-    pub use crate::sys::os_str_bytes::*;
-}
