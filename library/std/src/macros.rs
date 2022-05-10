@@ -335,7 +335,7 @@ macro_rules! assert_approx_eq {
 #[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! nro_header {
     () => {
-        global_asm!("
+        std::arch::global_asm!("
         .section .nro_header
         .global __nro_header_start
         .word 0
