@@ -2027,7 +2027,7 @@ dependencies = [
 [[package]]
 name = "libc-nnsdk"
 version = "0.0.1"
-source = "git+https://github.com/inspier/libc-nnsdk#03ad16e9092631e26c589627330e21a61882b5f2"
+source = "git+https://github.com/inspier/libc-nnsdk.git#03ad16e9092631e26c589627330e21a61882b5f2"
 dependencies = [
  "rustc-std-workspace-core",
 ]
@@ -2417,7 +2417,7 @@ version = "0.1.0"
 source = "git+https://github.com/inspier/nnsdk-rs.git#9e0c1c2c28f1bf42f8595d030e61a6bf271d39c7"
 dependencies = [
  "compiler_builtins",
- "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk)",
+ "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk.git)",
  "rustc-std-workspace-core",
 ]
 
@@ -2622,7 +2622,7 @@ dependencies = [
  "cfg-if 0.1.10",
  "compiler_builtins",
  "core",
- "libc",
+ "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk.git)",
 ]
 
 [[package]]

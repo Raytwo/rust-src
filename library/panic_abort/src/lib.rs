@@ -52,7 +52,7 @@ pub unsafe extern "C-unwind" fn __rust_start_panic(_payload: *mut &mut dyn BoxMe
                 #[repr(C)] struct TimeSpan { pub nanoseconds: u64 }
 
                 sleep(TimeSpan { nanoseconds: 100000000 });
-                core::intrinsics::abort();
+                libc::abort();
             }
         } else if #[cfg(any(target_os = "hermit",
                             target_os = "solid_asp3",
