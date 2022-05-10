@@ -557,8 +557,11 @@ impl DirBuilder {
     pub fn mkdir(&self, path: &Path) -> io::Result<()> {
         let path = cstr(path)?;
 
+        println!("mkdir");
         unsafe {
-            r_try!(nnsdk::fs::CreateDirectory(path.as_ptr() as *const _))
+            let result = dbg!(r_try!(nnsdk::fs::CreateDirectory(path.as_ptr() as *const _)));
+            println!("after r_try");
+            result
         }
     }
 }
