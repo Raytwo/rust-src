@@ -1,3 +1,4 @@
+use crate::cmp;
 use crate::ffi::{OsString, CStr, OsStr};
 use crate::os::switch::ffi::OsStrExt;
 use crate::fmt;
@@ -434,11 +435,44 @@ impl File {
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        unimplemented!()
+        ret_if_null!(self.inner);
+        let mut out_size = 0;
+        let rc = unsafe {
+            nnsdk::fs::ReadFile1(
+                &mut out_size,
+                self.inner,
+                offset as _,
+                buf.as_ptr() as _,
+                buf.len() as _
+            )
+        };
+
+        if rc == 0 {
+            self.pos.fetch_add(out_size, Ordering::SeqCst);
+            Ok(out_size as usize)
+        } else {
+            Err(io::Error::from_raw_os_error(rc as _))
+        }
     }
 
     pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
-        unimplemented!()
+        ret_if_null!(self.inner);
+        let mut out_size = 0;
+        let rc = unsafe {
+            nnsdk::fs::ReadFile1(
+                &mut out_size,
+                self.inner,
+                self.pos() as _,
+                buf.unfilled_mut().as_ptr() as _,
+                buf.unfilled_mut().len() as _,
+            )
+        };
+
+        unsafe {
+            buf.assume_init(out_size as usize);
+        }
+        buf.add_filled(out_size as usize);
+        Ok(())
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
@@ -557,11 +591,8 @@ impl DirBuilder {
     pub fn mkdir(&self, path: &Path) -> io::Result<()> {
         let path = cstr(path)?;
 
-        println!("mkdir");
         unsafe {
-            let result = dbg!(r_try!(nnsdk::fs::CreateDirectory(path.as_ptr() as *const _)));
-            println!("after r_try");
-            result
+            r_try!(nnsdk::fs::CreateDirectory(path.as_ptr() as *const _))
         }
     }
 }
