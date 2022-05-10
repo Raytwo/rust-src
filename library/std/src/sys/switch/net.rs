@@ -5,7 +5,7 @@ use crate::ffi::CStr;
 use crate::io::{self, IoSlice, IoSliceMut};
 use crate::mem;
 use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
-use crate::os::switch::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
+// use crate::os::switch::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use crate::str;
 use crate::sys::fd::FileDesc;
 use crate::sys_common::net::{getsockopt, setsockopt, sockaddr_to_addr};
@@ -278,6 +278,29 @@ impl Socket {
         Ok(())
     }
 
+    // pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
+    //     let linger = libc::linger {
+    //         l_onoff: linger.is_some() as libc::c_int,
+    //         l_linger: linger.unwrap_or_default().as_secs() as libc::c_int,
+    //     };
+
+    //     setsockopt(self, libc::SOL_SOCKET, libc::SO_LINGER, linger)
+    // }
+
+    // pub fn linger(&self) -> io::Result<Option<Duration>> {
+    //     let val: libc::linger = getsockopt(self, libc::SOL_SOCKET, SO_LINGER)?;
+
+    //     Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    // }
+
+    pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn linger(&self) -> io::Result<Option<Duration>> {
+        unsupported()
+    }
+
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         setsockopt(self, libc::IPPROTO_TCP, libc::TCP_NODELAY, nodelay as c_int)
     }
@@ -298,8 +321,8 @@ impl Socket {
     }
 
     // This is used by sys_common code to abstract over Windows and Unix.
-    pub fn as_raw(&self) -> RawFd {
-        self.as_raw_fd()
+    pub fn as_raw(&self) -> c_int {
+        *self.as_inner()
     }
 }
 
@@ -318,12 +341,6 @@ impl FromInner<c_int> for Socket {
 impl IntoInner<c_int> for Socket {
     fn into_inner(self) -> c_int {
         self.0.into_raw()
-    }
-}
-
-impl AsRawFd for Socket {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0.as_raw_fd()
     }
 }
 

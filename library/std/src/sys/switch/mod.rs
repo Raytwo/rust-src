@@ -50,6 +50,7 @@ pub mod env;
 // pub mod fast_thread_local;
 pub mod fs;
 pub mod io;
+pub mod locks;
 pub mod memchr;
 pub mod net;
 pub mod os;
