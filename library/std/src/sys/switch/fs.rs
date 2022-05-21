@@ -468,11 +468,16 @@ impl File {
             )
         };
 
-        unsafe {
-            buf.assume_init(out_size as usize);
+        if rc == 0 {
+            unsafe {
+                buf.assume_init(out_size as usize);
+            }
+            buf.add_filled(out_size as usize);
+            self.pos.fetch_add(out_size, Ordering::SeqCst);
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(rc as _))
         }
-        buf.add_filled(out_size as usize);
-        Ok(())
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
