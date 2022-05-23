@@ -2045,30 +2045,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libc-nnsdk"
-version = "0.0.1"
-source = "git+https://github.com/ultimate-research/libc-nnsdk.git#efed8f62261c993a30e909556ab73c4f191e26d5"
-dependencies = [
- "rustc-std-workspace-core",
-]
-
-[[package]]
-name = "libc-nnsdk"
-version = "0.0.1"
-source = "git+https://github.com/inspier/libc-nnsdk.git#03ad16e9092631e26c589627330e21a61882b5f2"
-dependencies = [
- "rustc-std-workspace-core",
-]
-
-[[package]]
-name = "libc-nnsdk"
-version = "0.0.1"
-source = "git+https://github.com/ultimate-research/libc-nnsdk.git#efed8f62261c993a30e909556ab73c4f191e26d5"
-dependencies = [
- "rustc-std-workspace-core",
-]
-
-[[package]]
 name = "libgit2-sys"
 version = "0.13.2+1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
