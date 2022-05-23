@@ -17,14 +17,24 @@
 //! synchronization as there are no threads!
 
 use crate::alloc::{GlobalAlloc, Layout, System};
+use crate::{cmp, mem, ptr};
 
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
 unsafe impl GlobalAlloc for System {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match layout.align() {
-            0 | 1 => libc::malloc(layout.size()) as *mut u8,
-            _n => libc::memalign(layout.align(), layout.size()) as *mut u8,
+        if layout.align() <= 16 && layout.align() <= layout.size() {
+            libc::malloc(layout.size()) as *mut u8
+        } else {
+            let mut out = ptr::null_mut();
+            let align = layout.align().max(mem::size_of::<usize>());
+            let ret = libc::posix_memalign(&mut out, align, layout.size());
+
+            if ret != 0 {
+                ptr::null_mut()
+            } else {
+                out as *mut u8
+            }
         }
     }
 
@@ -39,8 +49,17 @@ unsafe impl GlobalAlloc for System {
     }
 
     #[inline]
-    unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
-        libc::realloc(ptr as *mut libc::c_void, new_size) as *mut u8
+    unsafe fn realloc(&self, ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {
+        let new_layout = Layout::from_size_align_unchecked(new_size, old_layout.align());
+        let new_ptr = Self.alloc(new_layout);
+
+        if !new_ptr.is_null() {
+            let size = cmp::min(old_layout.size(), new_size);
+            ptr::copy_nonoverlapping(ptr, new_ptr, size);
+            Self.dealloc(ptr, old_layout);
+        }
+
+        new_ptr
     }
 }
 
