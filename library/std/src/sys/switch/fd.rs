@@ -9,7 +9,7 @@ use crate::sys_common::AsInner;
 
 use libc::{c_int, c_void, ssize_t};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileDesc {
     fd: c_int,
 }

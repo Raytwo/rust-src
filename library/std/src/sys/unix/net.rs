@@ -486,7 +486,7 @@ impl AsRawFd for Socket {
 
 impl IntoRawFd for Socket {
     fn into_raw_fd(self) -> RawFd {
-        self.0.into_raw_fd()
+        self.0
     }
 }
 
