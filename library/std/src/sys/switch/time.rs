@@ -12,13 +12,11 @@ pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 impl Instant {
     pub fn now() -> Instant {
         unsafe {
-            let mut ptime = PosixTime {
-                time: 0,
-            };
+            let tick = nnsdk::os::GetSystemTick();
 
-            nnsdk::time::StandardUserSystemClock::GetCurrentTime(&mut ptime);
+            let nanos = (tick * 625) / 12; // constant rate
 
-            Instant(Duration::new(ptime.time, 0))
+            Instant(Duration::from_nanos(nanos))
         }
     }
 
