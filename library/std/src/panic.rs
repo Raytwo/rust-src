@@ -297,7 +297,7 @@ pub fn get_backtrace_style() -> Option<BacktraceStyle> {
 
     // Setting environment variables for Fuchsia components isn't a standard
     // or easily supported workflow. For now, display backtraces by default.
-    let format = if cfg!(target_os = "fuchsia") {
+    let format = if cfg!(any(target_os = "fuchsia", target_os = "switch")) {
         BacktraceStyle::Full
     } else {
         crate::env::var_os("RUST_BACKTRACE")
