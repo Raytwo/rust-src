@@ -74,14 +74,14 @@ impl Socket {
     }
 
     pub fn new_pair(fam: c_int, ty: c_int) -> io::Result<(Socket, Socket)> {
-            let mut fds = [0, 0];
+        let mut fds = [0, 0];
 
-            cvt(libc::socketpair(fam, ty, 0, fds.as_mut_ptr()))?;
-            let a = FileDesc::new(fds[0]);
-            let b = FileDesc::new(fds[1]);
-            a.set_cloexec()?;
-            b.set_cloexec()?;
-            Ok((Socket(a), Socket(b)))
+        cvt(libc::socketpair(fam, ty, 0, fds.as_mut_ptr()))?;
+        let a = FileDesc::new(fds[0]);
+        let b = FileDesc::new(fds[1]);
+        a.set_cloexec()?;
+        b.set_cloexec()?;
+        Ok((Socket(a), Socket(b)))
     }
 
     pub fn connect_timeout(&self, addr: &SocketAddr, timeout: Duration) -> io::Result<()> {
@@ -204,7 +204,10 @@ impl Socket {
                 &mut addrlen,
             )
         })?;
-        Ok((n as usize, sockaddr_to_addr(&storage, addrlen as usize)?))
+        Ok((
+            n as usize,
+            sockaddr_to_addr(&storage, mem::size_of_val(&storage) as libc::socklen_t as usize)?,
+        ))
     }
 
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
@@ -311,8 +314,19 @@ impl Socket {
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-        let mut nonblocking = nonblocking as libc::c_int;
-        cvt(unsafe { libc::fcntl(*self.as_inner(), libc::O_NONBLOCK, &mut nonblocking) }).map(drop)
+        unsafe {
+            let previous = cvt(libc::fcntl(self.as_raw_fd(), libc::F_GETFL))?;
+            let new = if nonblocking {
+                previous | libc::O_NONBLOCK
+            } else {
+                previous & !libc::O_NONBLOCK
+            };
+            if new != previous {
+                cvt(libc::fcntl(self.as_raw_fd(), libc::F_SETFL, new))?;
+            }
+
+            Ok(())
+        }
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
