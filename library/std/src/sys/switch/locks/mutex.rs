@@ -1,11 +1,12 @@
 use crate::cell::UnsafeCell;
 use crate::mem::MaybeUninit;
+use crate::sys_common::lazy_box::{LazyBox, LazyInit};
 
 pub struct Mutex {
     inner: UnsafeCell<libc::pthread_mutex_t>,
 }
 
-pub type MovableMutex = Box<Mutex>;
+pub(crate) type MovableMutex = LazyBox<Mutex>;
 
 #[inline]
 #[allow(dead_code)]
@@ -15,6 +16,14 @@ pub unsafe fn raw(m: &Mutex) -> *mut libc::pthread_mutex_t {
 
 unsafe impl Send for Mutex {}
 unsafe impl Sync for Mutex {}
+
+impl LazyInit for Mutex {
+    fn init() -> Box<Self> {
+        let mut mutex = Box::new(Self::new());
+        unsafe { mutex.init() };
+        mutex
+    }
+}
 
 #[allow(dead_code)] // sys isn't exported yet
 impl Mutex {
@@ -130,5 +139,23 @@ impl ReentrantMutex {
     pub unsafe fn destroy(&self) {
         let result = libc::pthread_mutex_destroy(self.inner.get());
         debug_assert_eq!(result, 0);
+    }
+}
+
+impl Drop for Mutex {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe { self.destroy() };
+    }
+}
+
+pub(super) struct PthreadMutexAttr<'a>(pub &'a mut MaybeUninit<libc::pthread_mutexattr_t>);
+
+impl Drop for PthreadMutexAttr<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            let result = libc::pthread_mutexattr_destroy(self.0.as_mut_ptr());
+            debug_assert_eq!(result, 0);
+        }
     }
 }

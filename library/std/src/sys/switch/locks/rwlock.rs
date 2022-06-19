@@ -1,13 +1,20 @@
 use crate::cell::UnsafeCell;
+use crate::sys_common::lazy_box::{LazyBox, LazyInit};
 
 pub struct RwLock {
     mode: UnsafeCell<isize>,
 }
 
-pub type MovableRwLock = Box<RwLock>;
+pub(crate) type MovableRwLock = LazyBox<RwLock>;
 
 unsafe impl Send for RwLock {}
 unsafe impl Sync for RwLock {} // no threads on wasm
+
+impl LazyInit for RwLock {
+    fn init() -> Box<Self> {
+        Box::new(Self::new())
+    }
+}
 
 impl RwLock {
     pub const fn new() -> RwLock {
@@ -68,4 +75,11 @@ impl RwLock {
 
     #[inline]
     pub unsafe fn destroy(&self) {}
+}
+
+impl Drop for RwLock {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe { self.destroy() };
+    }
 }

@@ -1,12 +1,13 @@
 use crate::cell::UnsafeCell;
 use super::mutex::{self, Mutex};
+use crate::sys_common::lazy_box::{LazyBox, LazyInit};
 use crate::time::Duration;
 
 pub struct Condvar {
     inner: UnsafeCell<libc::pthread_cond_t>,
 }
 
-pub type MovableCondvar = Box<Condvar>;
+pub(crate) type MovableCondvar = LazyBox<Condvar>;
 
 unsafe impl Send for Condvar {}
 unsafe impl Sync for Condvar {}
@@ -19,6 +20,14 @@ fn saturating_cast_to_time_t(value: u64) -> libc::time_t {
         <libc::time_t>::MAX
     } else {
         value as libc::time_t
+    }
+}
+
+impl LazyInit for Condvar {
+    fn init() -> Box<Self> {
+        let mut condvar = Box::new(Self::new());
+        unsafe { condvar.init() };
+        condvar
     }
 }
 
@@ -90,5 +99,12 @@ impl Condvar {
     pub unsafe fn destroy(&self) {
         let r = libc::pthread_cond_destroy(self.inner.get());
         debug_assert_eq!(r, 0);
+    }
+}
+
+impl Drop for Condvar {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe { self.destroy() };
     }
 }
