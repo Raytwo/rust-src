@@ -39,6 +39,13 @@ impl GenericParamDefKind {
             GenericParamDefKind::Type { .. } | GenericParamDefKind::Const { .. } => true,
         }
     }
+
+    pub fn is_synthetic(&self) -> bool {
+        match self {
+            GenericParamDefKind::Type { synthetic, .. } => *synthetic,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, TyEncodable, TyDecodable, HashStable)]
@@ -61,6 +68,29 @@ impl GenericParamDef {
             ty::EarlyBoundRegion { def_id: self.def_id, index: self.index, name: self.name }
         } else {
             bug!("cannot convert a non-lifetime parameter def to an early bound region")
+        }
+    }
+
+    pub fn has_default(&self) -> bool {
+        match self.kind {
+            GenericParamDefKind::Type { has_default, .. }
+            | GenericParamDefKind::Const { has_default } => has_default,
+            GenericParamDefKind::Lifetime => false,
+        }
+    }
+
+    pub fn default_value<'tcx>(
+        &self,
+        tcx: TyCtxt<'tcx>,
+    ) -> Option<EarlyBinder<ty::GenericArg<'tcx>>> {
+        match self.kind {
+            GenericParamDefKind::Type { has_default, .. } if has_default => {
+                Some(EarlyBinder(tcx.type_of(self.def_id).into()))
+            }
+            GenericParamDefKind::Const { has_default } if has_default => {
+                Some(EarlyBinder(tcx.const_param_default(self.def_id).into()))
+            }
+            _ => None,
         }
     }
 }
@@ -203,6 +233,51 @@ impl<'tcx> Generics {
         self.params.iter().any(|param| {
             matches!(param.kind, ty::GenericParamDefKind::Type { synthetic: true, .. })
         })
+    }
+
+    /// Returns the substs corresponding to the generic parameters
+    /// of this item, excluding `Self`.
+    ///
+    /// **This should only be used for diagnostics purposes.**
+    pub fn own_substs_no_defaults(
+        &'tcx self,
+        tcx: TyCtxt<'tcx>,
+        substs: &'tcx [ty::GenericArg<'tcx>],
+    ) -> &'tcx [ty::GenericArg<'tcx>] {
+        let mut own_params = self.parent_count..self.count();
+        if self.has_self && self.parent.is_none() {
+            own_params.start = 1;
+        }
+
+        // Filter the default arguments.
+        //
+        // This currently uses structural equality instead
+        // of semantic equivalance. While not ideal, that's
+        // good enough for now as this should only be used
+        // for diagnostics anyways.
+        own_params.end -= self
+            .params
+            .iter()
+            .rev()
+            .take_while(|param| {
+                param.default_value(tcx).map_or(false, |default| {
+                    default.subst(tcx, substs) == substs[param.index as usize]
+                })
+            })
+            .count();
+
+        &substs[own_params]
+    }
+
+    /// Returns the substs corresponding to the generic parameters of this item, excluding `Self`.
+    ///
+    /// **This should only be used for diagnostics purposes.**
+    pub fn own_substs(
+        &'tcx self,
+        substs: &'tcx [ty::GenericArg<'tcx>],
+    ) -> &'tcx [ty::GenericArg<'tcx>] {
+        let own = &substs[self.parent_count..][..self.params.len()];
+        if self.has_self && self.parent.is_none() { &own[1..] } else { &own }
     }
 }
 

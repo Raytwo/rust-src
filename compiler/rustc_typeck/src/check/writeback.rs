@@ -14,7 +14,7 @@ use rustc_infer::infer::InferCtxt;
 use rustc_middle::hir::place::Place as HirPlace;
 use rustc_middle::mir::FakeReadCause;
 use rustc_middle::ty::adjustment::{Adjust, Adjustment, PointerCast};
-use rustc_middle::ty::fold::{TypeFoldable, TypeFolder};
+use rustc_middle::ty::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::{self, ClosureSizeProfileData, Ty, TyCtxt};
 use rustc_span::symbol::sym;
 use rustc_span::Span;
@@ -70,6 +70,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         wbcx.visit_user_provided_tys();
         wbcx.visit_user_provided_sigs();
         wbcx.visit_generator_interior_types();
+
+        wbcx.typeck_results.rvalue_scopes =
+            mem::take(&mut self.typeck_results.borrow_mut().rvalue_scopes);
 
         let used_trait_imports =
             mem::take(&mut self.typeck_results.borrow_mut().used_trait_imports);
@@ -258,10 +261,8 @@ impl<'cx, 'tcx> Visitor<'tcx> for WritebackCx<'cx, 'tcx> {
         self.fix_scalar_builtin_expr(e);
         self.fix_index_builtin_expr(e);
 
-        self.visit_node_id(e.span, e.hir_id);
-
         match e.kind {
-            hir::ExprKind::Closure(_, _, body, _, _) => {
+            hir::ExprKind::Closure { body, .. } => {
                 let body = self.fcx.tcx.hir().body(body);
                 for param in body.params {
                     self.visit_node_id(e.span, param.hir_id);
@@ -286,6 +287,7 @@ impl<'cx, 'tcx> Visitor<'tcx> for WritebackCx<'cx, 'tcx> {
             _ => {}
         }
 
+        self.visit_node_id(e.span, e.hir_id);
         intravisit::walk_expr(self, e);
     }
 

@@ -26,5 +26,4 @@ fn create_and_solve_subproblems<'data_provider, 'original_data, MP>(
     tableau: Tableau<'data_provider, AdaptedMatrixProvider<'original_data, MP>>,
 ) {
     let _: AdaptedMatrixProvider<'original_data, MP> = tableau.provider().clone_with_extra_bound();
-    //~^ ERROR lifetime mismatch
 } //~ ERROR `main` function not found in crate

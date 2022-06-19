@@ -33,11 +33,11 @@ use rustc_infer::infer::LateBoundRegionConversionTime;
 use rustc_middle::dep_graph::{DepKind, DepNodeIndex};
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::thir::abstract_const::NotConstEvaluatable;
-use rustc_middle::ty::fast_reject::{self, TreatParams};
+use rustc_middle::ty::fast_reject::{DeepRejectCtxt, TreatParams};
 use rustc_middle::ty::fold::BottomUpFolder;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::relate::TypeRelation;
-use rustc_middle::ty::subst::{GenericArgKind, Subst, SubstsRef};
+use rustc_middle::ty::subst::{Subst, SubstsRef};
 use rustc_middle::ty::{self, EarlyBinder, PolyProjectionPredicate, ToPolyTraitRef, ToPredicate};
 use rustc_middle::ty::{Ty, TyCtxt, TypeFoldable};
 use rustc_span::symbol::sym;
@@ -622,7 +622,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                         //
                         // Let's just see where this breaks :shrug:
                         if let (ty::ConstKind::Unevaluated(a), ty::ConstKind::Unevaluated(b)) =
-                            (c1.val(), c2.val())
+                            (c1.kind(), c2.kind())
                         {
                             if self.infcx.try_unify_abstract_consts(
                                 a.shrink(),
@@ -635,14 +635,16 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     }
 
                     let evaluate = |c: ty::Const<'tcx>| {
-                        if let ty::ConstKind::Unevaluated(unevaluated) = c.val() {
-                            self.infcx
-                                .const_eval_resolve(
-                                    obligation.param_env,
-                                    unevaluated,
-                                    Some(obligation.cause.span),
-                                )
-                                .map(|val| ty::Const::from_value(self.tcx(), val, c.ty()))
+                        if let ty::ConstKind::Unevaluated(unevaluated) = c.kind() {
+                            match self.infcx.try_const_eval_resolve(
+                                obligation.param_env,
+                                unevaluated,
+                                c.ty(),
+                                Some(obligation.cause.span),
+                            ) {
+                                Ok(val) => Ok(val),
+                                Err(e) => Err(e),
+                            }
                         } else {
                             Ok(c)
                         }
@@ -1453,7 +1455,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         potentially_unnormalized_candidates: bool,
     ) -> ProjectionMatchesProjection {
         let mut nested_obligations = Vec::new();
-        let (infer_predicate, _) = self.infcx.replace_bound_vars_with_fresh_vars(
+        let infer_predicate = self.infcx.replace_bound_vars_with_fresh_vars(
             obligation.cause.span,
             LateBoundRegionConversionTime::HigherRankedType,
             env_predicate,
@@ -2043,7 +2045,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         impl_def_id: DefId,
         obligation: &TraitObligation<'tcx>,
     ) -> Normalized<'tcx, SubstsRef<'tcx>> {
-        match self.match_impl(impl_def_id, obligation) {
+        let impl_trait_ref = self.tcx().bound_impl_trait_ref(impl_def_id).unwrap();
+        match self.match_impl(impl_def_id, impl_trait_ref, obligation) {
             Ok(substs) => substs,
             Err(()) => {
                 self.infcx.tcx.sess.delay_span_bug(
@@ -2070,17 +2073,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     fn match_impl(
         &mut self,
         impl_def_id: DefId,
+        impl_trait_ref: EarlyBinder<ty::TraitRef<'tcx>>,
         obligation: &TraitObligation<'tcx>,
     ) -> Result<Normalized<'tcx, SubstsRef<'tcx>>, ()> {
-        let impl_trait_ref = self.tcx().bound_impl_trait_ref(impl_def_id).unwrap();
-
-        // Before we create the substitutions and everything, first
-        // consider a "quick reject". This avoids creating more types
-        // and so forth that we need to.
-        if self.fast_reject_trait_refs(obligation, &impl_trait_ref.0) {
-            return Err(());
-        }
-
         let placeholder_obligation =
             self.infcx().replace_bound_vars_with_placeholders(obligation.predicate);
         let placeholder_obligation_trait_ref = placeholder_obligation.trait_ref;
@@ -2137,40 +2132,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // We can avoid creating type variables and doing the full
         // substitution if we find that any of the input types, when
         // simplified, do not match.
-
-        iter::zip(obligation.predicate.skip_binder().trait_ref.substs, impl_trait_ref.substs).any(
-            |(obligation_arg, impl_arg)| {
-                match (obligation_arg.unpack(), impl_arg.unpack()) {
-                    (GenericArgKind::Type(obligation_ty), GenericArgKind::Type(impl_ty)) => {
-                        // Note, we simplify parameters for the obligation but not the
-                        // impl so that we do not reject a blanket impl but do reject
-                        // more concrete impls if we're searching for `T: Trait`.
-                        let simplified_obligation_ty = fast_reject::simplify_type(
-                            self.tcx(),
-                            obligation_ty,
-                            TreatParams::AsPlaceholder,
-                        );
-                        let simplified_impl_ty =
-                            fast_reject::simplify_type(self.tcx(), impl_ty, TreatParams::AsInfer);
-
-                        simplified_obligation_ty.is_some()
-                            && simplified_impl_ty.is_some()
-                            && simplified_obligation_ty != simplified_impl_ty
-                    }
-                    (GenericArgKind::Lifetime(_), GenericArgKind::Lifetime(_)) => {
-                        // Lifetimes can never cause a rejection.
-                        false
-                    }
-                    (GenericArgKind::Const(_), GenericArgKind::Const(_)) => {
-                        // Conservatively ignore consts (i.e. assume they might
-                        // unify later) until we have `fast_reject` support for
-                        // them (if we'll ever need it, even).
-                        false
-                    }
-                    _ => unreachable!(),
-                }
-            },
-        )
+        let drcx = DeepRejectCtxt { treat_obligation_params: TreatParams::AsPlaceholder };
+        iter::zip(obligation.predicate.skip_binder().trait_ref.substs, impl_trait_ref.substs)
+            .any(|(obl, imp)| !drcx.generic_args_may_unify(obl, imp))
     }
 
     /// Normalize `where_clause_trait_ref` and try to match it against

@@ -13,7 +13,6 @@
 #![feature(let_else)]
 #![feature(min_specialization)]
 #![feature(never_type)]
-#![feature(nll)]
 #![feature(rustc_attrs)]
 #![feature(step_trait)]
 
@@ -28,6 +27,7 @@ extern crate tracing;
 
 pub mod abi;
 pub mod asm;
+pub mod json;
 pub mod spec;
 
 #[cfg(test)]

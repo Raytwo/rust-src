@@ -142,10 +142,10 @@ struct InferBorrowKindVisitor<'a, 'tcx> {
 impl<'a, 'tcx> Visitor<'tcx> for InferBorrowKindVisitor<'a, 'tcx> {
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
         match expr.kind {
-            hir::ExprKind::Closure(cc, _, body_id, _, _) => {
+            hir::ExprKind::Closure { capture_clause, body: body_id, .. } => {
                 let body = self.fcx.tcx.hir().body(body_id);
                 self.visit_body(body);
-                self.fcx.analyze_closure(expr.hir_id, expr.span, body_id, body, cc);
+                self.fcx.analyze_closure(expr.hir_id, expr.span, body_id, body, capture_clause);
             }
             hir::ExprKind::ConstBlock(anon_const) => {
                 let body = self.fcx.tcx.hir().body(anon_const.body);
@@ -2039,7 +2039,7 @@ fn should_do_rust_2021_incompatible_closure_captures_analysis(
 /// - s2: Comma separated names of the variables being migrated.
 fn migration_suggestion_for_2229(
     tcx: TyCtxt<'_>,
-    need_migrations: &Vec<NeededMigration>,
+    need_migrations: &[NeededMigration],
 ) -> (String, String) {
     let need_migrations_variables = need_migrations
         .iter()

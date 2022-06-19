@@ -7,8 +7,10 @@
 #![allow(unused_assignments)]
 #![allow(dead_code)]
 
+use std::num::ParseIntError;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 use std::sync::{Mutex, MutexGuard};
 
 struct State {}
@@ -29,8 +31,8 @@ fn should_not_trigger_lint_with_mutex_guard_outside_match() {
     match is_foo {
         true => {
             mutex.lock().unwrap().bar();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -43,8 +45,8 @@ fn should_not_trigger_lint_with_mutex_guard_when_taking_ownership_in_match() {
         Ok(guard) => {
             guard.foo();
             mutex.lock().unwrap().bar();
-        }
-        _ => {}
+        },
+        _ => {},
     };
 }
 
@@ -57,8 +59,8 @@ fn should_trigger_lint_with_mutex_guard_in_match_scrutinee() {
     match mutex.lock().unwrap().foo() {
         true => {
             mutex.lock().unwrap().bar();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -68,10 +70,10 @@ fn should_not_trigger_lint_for_insignificant_drop() {
     match 1u64.to_string().is_empty() {
         true => {
             println!("It was empty")
-        }
+        },
         false => {
             println!("It was not empty")
-        }
+        },
     }
 }
 
@@ -131,12 +133,12 @@ fn should_trigger_lint_with_wrapped_mutex() {
         1 => {
             println!("Got 1. Is it still 1?");
             println!("{}", s.lock_m().get_the_value());
-        }
+        },
         2 => {
             println!("Got 2. Is it still 2?");
             println!("{}", s.lock_m().get_the_value());
-        }
-        _ => {}
+        },
+        _ => {},
     }
     println!("All done!");
 }
@@ -152,12 +154,12 @@ fn should_trigger_lint_with_double_wrapped_mutex() {
         1 => {
             println!("Got 1. Is it still 1?");
             println!("{}", s.lock_m().get_the_value());
-        }
+        },
         2 => {
             println!("Got 2. Is it still 2?");
             println!("{}", s.lock_m().get_the_value());
-        }
-        _ => {}
+        },
+        _ => {},
     }
     println!("All done!");
 }
@@ -201,10 +203,10 @@ fn should_trigger_lint_for_vec() {
             let current_count = counter.i.load(Ordering::Relaxed);
             println!("Current count {}", current_count);
             assert_eq!(current_count, 0);
-        }
-        1 => {}
-        3 => {}
-        _ => {}
+        },
+        1 => {},
+        3 => {},
+        _ => {},
     };
 }
 
@@ -224,8 +226,8 @@ fn should_trigger_lint_for_tuple_in_scrutinee() {
                 println!("started");
                 mutex1.lock().unwrap().s.len();
                 println!("done");
-            }
-            (_, _) => {}
+            },
+            (_, _) => {},
         };
 
         match (true, mutex1.lock().unwrap().s.len(), true) {
@@ -233,8 +235,8 @@ fn should_trigger_lint_for_tuple_in_scrutinee() {
                 println!("started");
                 mutex1.lock().unwrap().s.len();
                 println!("done");
-            }
-            (_, _, _) => {}
+            },
+            (_, _, _) => {},
         };
 
         let mutex2 = Mutex::new(StateWithField { s: "two".to_owned() });
@@ -244,8 +246,8 @@ fn should_trigger_lint_for_tuple_in_scrutinee() {
                 mutex1.lock().unwrap().s.len();
                 mutex2.lock().unwrap().s.len();
                 println!("done");
-            }
-            (_, _, _) => {}
+            },
+            (_, _, _) => {},
         };
 
         let mutex3 = Mutex::new(StateWithField { s: "three".to_owned() });
@@ -255,10 +257,9 @@ fn should_trigger_lint_for_tuple_in_scrutinee() {
                 mutex1.lock().unwrap().s.len();
                 mutex2.lock().unwrap().s.len();
                 println!("done");
-            }
-            _ => {}
+            },
+            _ => {},
         };
-
 
         match (true, mutex3.lock().unwrap().s.as_str()) {
             (_, "three") => {
@@ -266,8 +267,8 @@ fn should_trigger_lint_for_tuple_in_scrutinee() {
                 mutex1.lock().unwrap().s.len();
                 mutex2.lock().unwrap().s.len();
                 println!("done");
-            }
-            (_, _) => {}
+            },
+            (_, _) => {},
         };
     }
 }
@@ -282,15 +283,15 @@ fn should_trigger_lint_for_accessing_field_in_mutex_in_one_side_of_binary_op() {
     match mutex.lock().unwrap().s.len() > 1 {
         true => {
             mutex.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 
     match 1 < mutex.lock().unwrap().s.len() {
         true => {
             mutex.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -300,20 +301,30 @@ fn should_trigger_lint_for_accessing_field_in_mutex_in_one_side_of_binary_op() {
 // drop problem, the lint recommends moving the entire binary operation.
 fn should_trigger_lint_for_accessing_fields_in_mutex_in_both_sides_of_binary_op() {
     let mutex1 = Mutex::new(StateWithField { s: "state".to_owned() });
-    let mutex2 = Mutex::new(StateWithField { s: "statewithfield".to_owned() });
+    let mutex2 = Mutex::new(StateWithField {
+        s: "statewithfield".to_owned(),
+    });
 
     match mutex1.lock().unwrap().s.len() < mutex2.lock().unwrap().s.len() {
         true => {
-            println!("{} < {}", mutex1.lock().unwrap().s.len(), mutex2.lock().unwrap().s.len());
-        }
-        false => {}
+            println!(
+                "{} < {}",
+                mutex1.lock().unwrap().s.len(),
+                mutex2.lock().unwrap().s.len()
+            );
+        },
+        false => {},
     };
 
     match mutex1.lock().unwrap().s.len() >= mutex2.lock().unwrap().s.len() {
         true => {
-            println!("{} >= {}", mutex1.lock().unwrap().s.len(), mutex2.lock().unwrap().s.len());
-        }
-        false => {}
+            println!(
+                "{} >= {}",
+                mutex1.lock().unwrap().s.len(),
+                mutex2.lock().unwrap().s.len()
+            );
+        },
+        false => {},
     };
 }
 
@@ -328,8 +339,8 @@ fn should_not_trigger_lint_for_closure_in_scrutinee() {
     match get_mutex_guard() > 1 {
         true => {
             mutex1.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -343,8 +354,8 @@ fn should_trigger_lint_for_return_from_closure_in_scrutinee() {
     match get_mutex_guard().s.len() > 1 {
         true => {
             mutex1.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -357,13 +368,20 @@ fn should_trigger_lint_for_return_from_match_in_scrutinee() {
     // Should trigger lint because the nested match within the scrutinee returns a temporary with a
     // significant drop is but not used directly in any match arms, so it has a potentially
     // surprising lifetime.
-    match match i { 100 => mutex1.lock().unwrap(), _ => mutex2.lock().unwrap() }.s.len() > 1 {
+    match match i {
+        100 => mutex1.lock().unwrap(),
+        _ => mutex2.lock().unwrap(),
+    }
+    .s
+    .len()
+        > 1
+    {
         true => {
             mutex1.lock().unwrap().s.len();
-        }
+        },
         false => {
             println!("nothing to do here");
-        }
+        },
     };
 }
 
@@ -376,11 +394,19 @@ fn should_trigger_lint_for_return_from_if_in_scrutinee() {
     // Should trigger lint because the nested if-expression within the scrutinee returns a temporary
     // with a significant drop is but not used directly in any match arms, so it has a potentially
     // surprising lifetime.
-    match if i > 1 { mutex1.lock().unwrap() } else { mutex2.lock().unwrap() }.s.len() > 1 {
+    match if i > 1 {
+        mutex1.lock().unwrap()
+    } else {
+        mutex2.lock().unwrap()
+    }
+    .s
+    .len()
+        > 1
+    {
         true => {
             mutex1.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -392,11 +418,15 @@ fn should_not_trigger_lint_for_if_in_scrutinee() {
     // Should not trigger the lint because the temporary with a significant drop *is* dropped within
     // the body of the if-expression nested within the match scrutinee, and therefore does not have
     // a potentially surprising lifetime.
-    match if i > 1 { mutex.lock().unwrap().s.len() > 1 } else { false } {
+    match if i > 1 {
+        mutex.lock().unwrap().s.len() > 1
+    } else {
+        false
+    } {
         true => {
             mutex.lock().unwrap().s.len();
-        }
-        false => {}
+        },
+        false => {},
     };
 }
 
@@ -430,7 +460,9 @@ struct StateStringWithBoxedMutexGuard {
 
 impl StateStringWithBoxedMutexGuard {
     fn new() -> StateStringWithBoxedMutexGuard {
-        StateStringWithBoxedMutexGuard { s: Mutex::new("A String".to_owned()) }
+        StateStringWithBoxedMutexGuard {
+            s: Mutex::new("A String".to_owned()),
+        }
     }
     fn lock(&self) -> Box<MutexGuard<String>> {
         Box::new(self.s.lock().unwrap())
@@ -450,7 +482,6 @@ fn should_trigger_lint_for_boxed_mutex_guard_holding_string() {
     };
 }
 
-
 struct StateWithIntField {
     i: u64,
 }
@@ -467,36 +498,36 @@ fn should_trigger_lint_in_assign_expr() {
     match mutex.lock().unwrap().i = i {
         _ => {
             println!("{}", mutex.lock().unwrap().i);
-        }
+        },
     };
 
     match i = mutex.lock().unwrap().i {
         _ => {
             println!("{}", mutex.lock().unwrap().i);
-        }
+        },
     };
 
     match mutex.lock().unwrap().i += 1 {
         _ => {
             println!("{}", mutex.lock().unwrap().i);
-        }
+        },
     };
 
     match i += mutex.lock().unwrap().i {
         _ => {
             println!("{}", mutex.lock().unwrap().i);
-        }
+        },
     };
 }
 
 #[derive(Debug)]
 enum RecursiveEnum {
-    Foo(Option<Box<RecursiveEnum>>)
+    Foo(Option<Box<RecursiveEnum>>),
 }
 
 #[derive(Debug)]
 enum GenericRecursiveEnum<T> {
-    Foo(T, Option<Box<GenericRecursiveEnum<T>>>)
+    Foo(T, Option<Box<GenericRecursiveEnum<T>>>),
 }
 
 fn should_not_cause_stack_overflow() {
@@ -506,20 +537,57 @@ fn should_not_cause_stack_overflow() {
     match f {
         RecursiveEnum::Foo(Some(f)) => {
             println!("{:?}", f)
-        }
+        },
         RecursiveEnum::Foo(f) => {
             println!("{:?}", f)
-        }
+        },
     }
 
     let f = GenericRecursiveEnum::Foo(1u64, Some(Box::new(GenericRecursiveEnum::Foo(2u64, None))));
     match f {
         GenericRecursiveEnum::Foo(i, Some(f)) => {
             println!("{} {:?}", i, f)
-        }
+        },
         GenericRecursiveEnum::Foo(i, f) => {
             println!("{} {:?}", i, f)
-        }
+        },
+    }
+}
+
+fn should_not_produce_lint_for_try_desugar() -> Result<u64, ParseIntError> {
+    // TryDesugar (i.e. using `?` for a Result type) will turn into a match but is out of scope
+    // for this lint
+    let rwlock = RwLock::new("1".to_string());
+    let result = rwlock.read().unwrap().parse::<u64>()?;
+    println!("{}", result);
+    rwlock.write().unwrap().push('2');
+    Ok(result)
+}
+
+struct ResultReturner {
+    s: String,
+}
+
+impl ResultReturner {
+    fn to_number(&self) -> Result<i64, ParseIntError> {
+        self.s.parse::<i64>()
+    }
+}
+
+fn should_trigger_lint_for_non_ref_move_and_clone_suggestion() {
+    let rwlock = RwLock::<ResultReturner>::new(ResultReturner { s: "1".to_string() });
+    match rwlock.read().unwrap().to_number() {
+        Ok(n) => println!("Converted to number: {}", n),
+        Err(e) => println!("Could not convert {} to number", e),
+    };
+}
+
+fn should_trigger_lint_for_read_write_lock_for_loop() {
+    // For-in loops desugar to match expressions and are prone to the type of deadlock this lint is
+    // designed to look for.
+    let rwlock = RwLock::<Vec<String>>::new(vec!["1".to_string()]);
+    for s in rwlock.read().unwrap().iter() {
+        println!("{}", s);
     }
 }
 

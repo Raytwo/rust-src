@@ -7,7 +7,6 @@
 #![feature(const_convert)]
 #![feature(const_cow_is_borrowed)]
 #![feature(const_heap)]
-#![feature(const_intrinsic_copy)]
 #![feature(const_mut_refs)]
 #![feature(const_nonnull_slice_from_raw_parts)]
 #![feature(const_ptr_write)]
@@ -42,6 +41,9 @@
 #![feature(panic_update_hook)]
 #![feature(slice_flatten)]
 #![feature(thin_box)]
+#![feature(bench_black_box)]
+#![feature(strict_provenance)]
+#![feature(once_cell)]
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

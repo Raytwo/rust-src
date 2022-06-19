@@ -9,11 +9,9 @@ use super::{
 };
 
 pub trait Direction {
-    fn is_forward() -> bool;
+    const IS_FORWARD: bool;
 
-    fn is_backward() -> bool {
-        !Self::is_forward()
-    }
+    const IS_BACKWARD: bool = !Self::IS_FORWARD;
 
     /// Applies all effects between the given `EffectIndex`s.
     ///
@@ -68,9 +66,7 @@ pub trait Direction {
 pub struct Backward;
 
 impl Direction for Backward {
-    fn is_forward() -> bool {
-        false
-    }
+    const IS_FORWARD: bool = false;
 
     fn apply_effects_in_block<'tcx, A>(
         analysis: &A,
@@ -237,14 +233,12 @@ impl Direction for Backward {
                 // Apply terminator-specific edge effects.
                 //
                 // FIXME(ecstaticmorse): Avoid cloning the exit state unconditionally.
-                mir::TerminatorKind::Call { destination: Some((return_place, dest)), .. }
-                    if dest == bb =>
-                {
+                mir::TerminatorKind::Call { destination, target: Some(dest), .. } if dest == bb => {
                     let mut tmp = exit_state.clone();
                     analysis.apply_call_return_effect(
                         &mut tmp,
                         pred,
-                        CallReturnPlaces::Call(return_place),
+                        CallReturnPlaces::Call(destination),
                     );
                     propagate(pred, &tmp);
                 }
@@ -304,8 +298,8 @@ impl Direction for Backward {
     }
 }
 
-struct BackwardSwitchIntEdgeEffectsApplier<'a, D, F> {
-    body: &'a mir::Body<'a>,
+struct BackwardSwitchIntEdgeEffectsApplier<'a, 'tcx, D, F> {
+    body: &'a mir::Body<'tcx>,
     pred: BasicBlock,
     exit_state: &'a mut D,
     bb: BasicBlock,
@@ -314,7 +308,7 @@ struct BackwardSwitchIntEdgeEffectsApplier<'a, D, F> {
     effects_applied: bool,
 }
 
-impl<D, F> super::SwitchIntEdgeEffects<D> for BackwardSwitchIntEdgeEffectsApplier<'_, D, F>
+impl<D, F> super::SwitchIntEdgeEffects<D> for BackwardSwitchIntEdgeEffectsApplier<'_, '_, D, F>
 where
     D: Clone,
     F: FnMut(BasicBlock, &D),
@@ -340,9 +334,7 @@ where
 pub struct Forward;
 
 impl Direction for Forward {
-    fn is_forward() -> bool {
-        true
-    }
+    const IS_FORWARD: bool = true;
 
     fn apply_effects_in_block<'tcx, A>(
         analysis: &A,
@@ -532,20 +524,28 @@ impl Direction for Forward {
                 propagate(target, exit_state);
             }
 
-            Call { cleanup, destination, func: _, args: _, from_hir_call: _, fn_span: _ } => {
+            Call {
+                cleanup,
+                destination,
+                target,
+                func: _,
+                args: _,
+                from_hir_call: _,
+                fn_span: _,
+            } => {
                 if let Some(unwind) = cleanup {
                     if dead_unwinds.map_or(true, |dead| !dead.contains(bb)) {
                         propagate(unwind, exit_state);
                     }
                 }
 
-                if let Some((dest_place, target)) = destination {
+                if let Some(target) = target {
                     // N.B.: This must be done *last*, otherwise the unwind path will see the call
                     // return effect.
                     analysis.apply_call_return_effect(
                         exit_state,
                         bb,
-                        CallReturnPlaces::Call(dest_place),
+                        CallReturnPlaces::Call(destination),
                     );
                     propagate(target, exit_state);
                 }

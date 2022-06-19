@@ -8,7 +8,7 @@ use rustc_hir::{HirId, Node};
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, DefIdTree, Ty, TyCtxt, TypeFoldable, TypeFolder};
+use rustc_middle::ty::{self, DefIdTree, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_span::symbol::Ident;
 use rustc_span::{Span, DUMMY_SP};
 
@@ -161,38 +161,23 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
             // We've encountered an `AnonConst` in some path, so we need to
             // figure out which generic parameter it corresponds to and return
             // the relevant type.
-            let filtered = path.segments.iter().find_map(|seg| {
-                seg.args?
-                    .args
+            let Some((arg_index, segment)) = path.segments.iter().find_map(|seg| {
+                let args = seg.args?;
+                args.args
+                .iter()
+                .filter(|arg| arg.is_ty_or_const())
+                .position(|arg| arg.id() == hir_id)
+                .map(|index| (index, seg)).or_else(|| args.bindings
                     .iter()
-                    .filter(|arg| arg.is_ty_or_const())
-                    .position(|arg| arg.id() == hir_id)
-                    .map(|index| (index, seg))
-            });
-
-            // FIXME(associated_const_generics): can we blend this with iteration above?
-            let (arg_index, segment) = match filtered {
-                None => {
-                    let binding_filtered = path.segments.iter().find_map(|seg| {
-                        seg.args?
-                            .bindings
-                            .iter()
-                            .filter_map(TypeBinding::opt_const)
-                            .position(|ct| ct.hir_id == hir_id)
-                            .map(|idx| (idx, seg))
-                    });
-                    match binding_filtered {
-                        Some(inner) => inner,
-                        None => {
-                            tcx.sess.delay_span_bug(
-                                tcx.def_span(def_id),
-                                "no arg matching AnonConst in path",
-                            );
-                            return None;
-                        }
-                    }
-                }
-                Some(inner) => inner,
+                    .filter_map(TypeBinding::opt_const)
+                    .position(|ct| ct.hir_id == hir_id)
+                    .map(|idx| (idx, seg)))
+            }) else {
+                tcx.sess.delay_span_bug(
+                    tcx.def_span(def_id),
+                    "no arg matching AnonConst in path",
+                );
+                return None;
             };
 
             // Try to use the segment resolution if it is valid, otherwise we
@@ -420,7 +405,7 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
 
         Node::Field(field) => icx.to_ty(field.ty),
 
-        Node::Expr(&Expr { kind: ExprKind::Closure(..), .. }) => tcx.typeck(def_id).node_type(hir_id),
+        Node::Expr(&Expr { kind: ExprKind::Closure{..}, .. }) => tcx.typeck(def_id).node_type(hir_id),
 
         Node::AnonConst(_) if let Some(param) = tcx.opt_const_param_of(def_id) => {
             // We defer to `type_of` of the corresponding parameter
@@ -465,21 +450,10 @@ pub(super) fn type_of(tcx: TyCtxt<'_>, def_id: DefId) -> Ty<'_> {
                     .discr_type()
                     .to_ty(tcx),
 
-                Node::TraitRef(trait_ref @ &TraitRef {
-                  path, ..
-                }) if let Some((binding, seg)) =
-                  path
-                      .segments
-                      .iter()
-                      .find_map(|seg| {
-                          seg.args?.bindings
-                              .iter()
-                              .find_map(|binding| if binding.opt_const()?.hir_id == hir_id {
-                                Some((binding, seg))
-                              } else {
-                                None
-                              })
-                      }) =>
+                Node::TypeBinding(binding @ &TypeBinding { hir_id: binding_id, ..  })
+                    if let Node::TraitRef(trait_ref) = tcx.hir().get(
+                        tcx.hir().get_parent_node(binding_id)
+                    ) =>
                 {
                   let Some(trait_def_id) = trait_ref.trait_def_id() else {
                     return tcx.ty_error_with_message(DUMMY_SP, "Could not find trait");
@@ -619,7 +593,7 @@ fn find_opaque_ty_constraints(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Ty<'_> {
             self.tcx.hir()
         }
         fn visit_expr(&mut self, ex: &'tcx Expr<'tcx>) {
-            if let hir::ExprKind::Closure(..) = ex.kind {
+            if let hir::ExprKind::Closure { .. } = ex.kind {
                 let def_id = self.tcx.hir().local_def_id(ex.hir_id);
                 self.check(def_id);
             }
@@ -782,7 +756,7 @@ fn infer_placeholder_type<'a>(
                     diag.span_suggestion(
                         span,
                         "replace with the correct type",
-                        sugg_ty.to_string(),
+                        sugg_ty,
                         Applicability::MaybeIncorrect,
                     );
                 } else {

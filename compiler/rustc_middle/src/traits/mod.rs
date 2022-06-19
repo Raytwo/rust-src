@@ -115,8 +115,6 @@ impl Hash for ObligationCause<'_> {
     }
 }
 
-const MISC_OBLIGATION_CAUSE_CODE: ObligationCauseCode<'static> = MiscObligation;
-
 impl<'tcx> ObligationCause<'tcx> {
     #[inline]
     pub fn new(
@@ -201,7 +199,7 @@ pub struct UnifyReceiverContext<'tcx> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Lift, Default)]
 pub struct InternedObligationCauseCode<'tcx> {
-    /// `None` for `MISC_OBLIGATION_CAUSE_CODE` (a common case, occurs ~60% of
+    /// `None` for `ObligationCauseCode::MiscObligation` (a common case, occurs ~60% of
     /// the time). `Some` otherwise.
     code: Option<Lrc<ObligationCauseCode<'tcx>>>,
 }
@@ -210,7 +208,11 @@ impl<'tcx> ObligationCauseCode<'tcx> {
     #[inline(always)]
     fn into(self) -> InternedObligationCauseCode<'tcx> {
         InternedObligationCauseCode {
-            code: if let MISC_OBLIGATION_CAUSE_CODE = self { None } else { Some(Lrc::new(self)) },
+            code: if let ObligationCauseCode::MiscObligation = self {
+                None
+            } else {
+                Some(Lrc::new(self))
+            },
         }
     }
 }
@@ -219,7 +221,7 @@ impl<'tcx> std::ops::Deref for InternedObligationCauseCode<'tcx> {
     type Target = ObligationCauseCode<'tcx>;
 
     fn deref(&self) -> &Self::Target {
-        self.code.as_deref().unwrap_or(&MISC_OBLIGATION_CAUSE_CODE)
+        self.code.as_deref().unwrap_or(&ObligationCauseCode::MiscObligation)
     }
 }
 
@@ -931,7 +933,7 @@ impl ObjectSafetyViolation {
                                  trait objects",
                                 name
                             ),
-                            sugg.to_string(),
+                            sugg,
                             Applicability::MaybeIncorrect,
                         );
                     }
@@ -955,7 +957,7 @@ impl ObjectSafetyViolation {
                         "consider changing method `{}`'s `self` parameter to be `&self`",
                         name
                     ),
-                    "&Self".to_string(),
+                    "&Self",
                     Applicability::MachineApplicable,
                 );
             }

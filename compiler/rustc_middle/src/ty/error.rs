@@ -135,11 +135,10 @@ impl<'tcx> fmt::Display for TypeError<'tcx> {
             ArgCount => write!(f, "incorrect number of function parameters"),
             FieldMisMatch(adt, field) => write!(f, "field type mismatch: {}.{}", adt, field),
             RegionsDoesNotOutlive(..) => write!(f, "lifetime mismatch"),
-            RegionsInsufficientlyPolymorphic(br, _) => write!(
-                f,
-                "expected bound lifetime parameter{}, found concrete lifetime",
-                br_string(br)
-            ),
+            // Actually naming the region here is a bit confusing because context is lacking
+            RegionsInsufficientlyPolymorphic(..) => {
+                write!(f, "one type is more general than the other")
+            }
             RegionsOverlyPolymorphic(br, _) => write!(
                 f,
                 "expected concrete lifetime, found bound lifetime parameter{}",
@@ -255,7 +254,7 @@ impl<'tcx> Ty<'tcx> {
                 }
 
                 let n = tcx.lift(n).unwrap();
-                if let ty::ConstKind::Value(v) = n.val() {
+                if let ty::ConstKind::Value(v) = n.kind() {
                     if let Some(n) = v.try_to_machine_usize(tcx) {
                         return format!("array of {} element{}", n, pluralize!(n)).into();
                     }

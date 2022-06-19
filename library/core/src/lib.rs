@@ -114,7 +114,6 @@
 #![feature(const_convert)]
 #![feature(const_inherent_unchecked_arith)]
 #![feature(const_int_unchecked_arith)]
-#![feature(const_intrinsic_copy)]
 #![feature(const_intrinsic_forget)]
 #![feature(const_likely)]
 #![feature(const_maybe_uninit_uninit_array)]
@@ -310,6 +309,7 @@ pub mod ops;
 pub mod any;
 pub mod array;
 pub mod ascii;
+pub mod asserting;
 #[unstable(feature = "async_iterator", issue = "79024")]
 pub mod async_iter;
 pub mod cell;

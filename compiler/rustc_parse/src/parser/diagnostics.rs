@@ -1,8 +1,7 @@
 use super::pat::Expected;
-use super::ty::{AllowPlus, RecoverQuestionMark};
 use super::{
-    BlockMode, CommaRecoveryMode, Parser, PathStyle, RecoverColon, RecoverComma, Restrictions,
-    SemiColonMode, SeqSep, TokenExpectType, TokenType,
+    BlockMode, CommaRecoveryMode, Parser, PathStyle, Restrictions, SemiColonMode, SeqSep,
+    TokenExpectType, TokenType,
 };
 
 use crate::lexer::UnmatchedBrace;
@@ -17,10 +16,10 @@ use rustc_ast::{
 };
 use rustc_ast_pretty::pprust;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_errors::{pluralize, struct_span_err, Diagnostic, EmissionGuarantee, ErrorGuaranteed};
 use rustc_errors::{
-    Applicability, DiagnosticBuilder, DiagnosticMessage, Handler, MultiSpan, PResult,
+    fluent, Applicability, DiagnosticBuilder, DiagnosticMessage, Handler, MultiSpan, PResult,
 };
+use rustc_errors::{pluralize, struct_span_err, Diagnostic, EmissionGuarantee, ErrorGuaranteed};
 use rustc_macros::{SessionDiagnostic, SessionSubdiagnostic};
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::{kw, Ident};
@@ -29,6 +28,7 @@ use std::ops::{Deref, DerefMut};
 
 use std::mem::take;
 
+use crate::parser;
 use tracing::{debug, trace};
 
 const TURBOFISH_SUGGESTION_STR: &str =
@@ -254,23 +254,23 @@ struct AmbiguousPlus {
 
 #[derive(SessionDiagnostic)]
 #[error(code = "E0178", slug = "parser-maybe-recover-from-bad-type-plus")]
-struct BadTypePlus<'a> {
+struct BadTypePlus {
     pub ty: String,
     #[primary_span]
     pub span: Span,
     #[subdiagnostic]
-    pub sub: BadTypePlusSub<'a>,
+    pub sub: BadTypePlusSub,
 }
 
-#[derive(SessionSubdiagnostic, Clone, Copy)]
-pub enum BadTypePlusSub<'a> {
+#[derive(SessionSubdiagnostic)]
+pub enum BadTypePlusSub {
     #[suggestion(
         slug = "parser-add-paren",
         code = "{sum_with_parens}",
         applicability = "machine-applicable"
     )]
     AddParen {
-        sum_with_parens: &'a str,
+        sum_with_parens: String,
         #[primary_span]
         span: Span,
     },
@@ -286,10 +286,58 @@ pub enum BadTypePlusSub<'a> {
     },
 }
 
+#[derive(SessionDiagnostic)]
+#[error(slug = "parser-maybe-recover-from-bad-qpath-stage-2")]
+struct BadQPathStage2 {
+    #[primary_span]
+    #[suggestion(applicability = "maybe-incorrect")]
+    span: Span,
+    ty: String,
+}
+
+#[derive(SessionDiagnostic)]
+#[error(slug = "parser-incorrect-semicolon")]
+struct IncorrectSemicolon<'a> {
+    #[primary_span]
+    #[suggestion_short(applicability = "machine-applicable")]
+    span: Span,
+    #[help]
+    opt_help: Option<()>,
+    name: &'a str,
+}
+
+#[derive(SessionDiagnostic)]
+#[error(slug = "parser-incorrect-use-of-await")]
+struct IncorrectUseOfAwait {
+    #[primary_span]
+    #[suggestion(message = "parentheses-suggestion", applicability = "machine-applicable")]
+    span: Span,
+}
+
+#[derive(SessionDiagnostic)]
+#[error(slug = "parser-incorrect-use-of-await")]
+struct IncorrectAwait {
+    #[primary_span]
+    span: Span,
+    #[suggestion(message = "postfix-suggestion", code = "{expr}.await{question_mark}")]
+    sugg_span: (Span, Applicability),
+    expr: String,
+    question_mark: &'static str,
+}
+
+#[derive(SessionDiagnostic)]
+#[error(slug = "parser-in-in-typo")]
+struct InInTypo {
+    #[primary_span]
+    span: Span,
+    #[suggestion(applicability = "machine-applicable")]
+    sugg_span: Span,
+}
+
 // SnapshotParser is used to create a snapshot of the parser
 // without causing duplicate errors being emitted when the `Parser`
 // is dropped.
-pub(super) struct SnapshotParser<'a> {
+pub struct SnapshotParser<'a> {
     parser: Parser<'a>,
     unclosed_delims: Vec<UnmatchedBrace>,
 }
@@ -345,7 +393,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Create a snapshot of the `Parser`.
-    pub(super) fn create_snapshot_for_diagnostic(&self) -> SnapshotParser<'a> {
+    pub fn create_snapshot_for_diagnostic(&self) -> SnapshotParser<'a> {
         let mut snapshot = self.clone();
         let unclosed_delims = self.unclosed_delims.clone();
         // Clear `unclosed_delims` in snapshot to avoid
@@ -384,7 +432,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion_verbose(
                     ident.span.shrink_to_lo(),
                     &format!("escape `{}` to use it as an identifier", ident.name),
-                    "r#".to_owned(),
+                    "r#",
                     Applicability::MaybeIncorrect,
                 );
             }
@@ -398,7 +446,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion(
                     self.token.span,
                     "remove this comma",
-                    String::new(),
+                    "",
                     Applicability::MachineApplicable,
                 );
             }
@@ -434,6 +482,35 @@ impl<'a> Parser<'a> {
             .map(|x| TokenType::Token(x.clone()))
             .chain(inedible.iter().map(|x| TokenType::Token(x.clone())))
             .chain(self.expected_tokens.iter().cloned())
+            .filter_map(|token| {
+                // filter out suggestions which suggest the same token which was found and deemed incorrect
+                fn is_ident_eq_keyword(found: &TokenKind, expected: &TokenType) -> bool {
+                    if let TokenKind::Ident(current_sym, _) = found {
+                        if let TokenType::Keyword(suggested_sym) = expected {
+                            return current_sym == suggested_sym;
+                        }
+                    }
+                    false
+                }
+                if token != parser::TokenType::Token(self.token.kind.clone()) {
+                    let eq = is_ident_eq_keyword(&self.token.kind, &token);
+                    // if the suggestion is a keyword and the found token is an ident,
+                    // the content of which are equal to the suggestion's content,
+                    // we can remove that suggestion (see the return None statement below)
+
+                    // if this isn't the case however, and the suggestion is a token the
+                    // content of which is the same as the found token's, we remove it as well
+                    if !eq {
+                        if let TokenType::Token(kind) = &token {
+                            if kind == &self.token.kind {
+                                return None;
+                            }
+                        }
+                        return Some(token);
+                    }
+                }
+                return None;
+            })
             .collect::<Vec<_>>();
         expected.sort_by_cached_key(|x| x.to_string());
         expected.dedup();
@@ -471,7 +548,7 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let sp = self.prev_token.span;
                 self.struct_span_err(sp, &msg)
-                    .span_suggestion_short(sp, "change this to `;`", ";".to_string(), appl)
+                    .span_suggestion_short(sp, "change this to `;`", ";", appl)
                     .emit();
                 return Ok(true);
             } else if self.look_ahead(0, |t| {
@@ -490,7 +567,7 @@ impl<'a> Parser<'a> {
                 let sp = self.prev_token.span.shrink_to_hi();
                 self.struct_span_err(sp, &msg)
                     .span_label(self.token.span, "unexpected token")
-                    .span_suggestion_short(sp, "add `;` here", ";".to_string(), appl)
+                    .span_suggestion_short(sp, "add `;` here", ";", appl)
                     .emit();
                 return Ok(true);
             }
@@ -617,7 +694,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion(
                     span,
                     &format!("remove the extra `#`{}", pluralize!(count)),
-                    String::new(),
+                    "",
                     Applicability::MachineApplicable,
                 );
                 err.span_label(
@@ -658,13 +735,10 @@ impl<'a> Parser<'a> {
                     err.delay_as_bug();
                     self.struct_span_err(
                         expr.span,
-                        DiagnosticMessage::fluent("parser-struct-literal-body-without-path"),
+                        fluent::parser::struct_literal_body_without_path,
                     )
                     .multipart_suggestion(
-                        DiagnosticMessage::fluent_attr(
-                            "parser-struct-literal-body-without-path",
-                            "suggestion",
-                        ),
+                        fluent::parser::suggestion,
                         vec![
                             (expr.span.shrink_to_lo(), "{ SomeStruct ".to_string()),
                             (expr.span.shrink_to_hi(), " }".to_string()),
@@ -717,7 +791,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion(
                     sp,
                     "maybe write a path separator here",
-                    "::".to_string(),
+                    "::",
                     if allow_unstable {
                         Applicability::MaybeIncorrect
                     } else {
@@ -729,7 +803,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion(
                     sp,
                     "try using a semicolon",
-                    ";".to_string(),
+                    ";",
                     Applicability::MaybeIncorrect,
                 );
             } else if allow_unstable {
@@ -873,7 +947,7 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 span,
                 &format!("remove extra angle bracket{}", pluralize!(total_num_of_gt)),
-                String::new(),
+                "",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -955,7 +1029,7 @@ impl<'a> Parser<'a> {
                         e.span_suggestion_verbose(
                             binop.span.shrink_to_lo(),
                             TURBOFISH_SUGGESTION_STR,
-                            "::".to_string(),
+                            "::",
                             Applicability::MaybeIncorrect,
                         )
                         .emit();
@@ -1114,7 +1188,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion_verbose(
                         op.span.shrink_to_lo(),
                         TURBOFISH_SUGGESTION_STR,
-                        "::".to_string(),
+                        "::",
                         Applicability::MaybeIncorrect,
                     );
                 };
@@ -1236,26 +1310,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn maybe_report_ambiguous_plus(
-        &mut self,
-        allow_plus: AllowPlus,
-        impl_dyn_multi: bool,
-        ty: &Ty,
-    ) {
-        if matches!(allow_plus, AllowPlus::No) && impl_dyn_multi {
+    pub(super) fn maybe_report_ambiguous_plus(&mut self, impl_dyn_multi: bool, ty: &Ty) {
+        if impl_dyn_multi {
             self.sess.emit_err(AmbiguousPlus { sum_ty: pprust::ty_to_string(&ty), span: ty.span });
         }
     }
 
     /// Swift lets users write `Ty?` to mean `Option<Ty>`. Parse the construct and recover from it.
-    pub(super) fn maybe_recover_from_question_mark(
-        &mut self,
-        ty: P<Ty>,
-        recover_question_mark: RecoverQuestionMark,
-    ) -> P<Ty> {
-        if let RecoverQuestionMark::No = recover_question_mark {
-            return ty;
-        }
+    pub(super) fn maybe_recover_from_question_mark(&mut self, ty: P<Ty>) -> P<Ty> {
         if self.token == token::Question {
             self.bump();
             self.struct_span_err(self.prev_token.span, "invalid `?` in type")
@@ -1275,13 +1337,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn maybe_recover_from_bad_type_plus(
-        &mut self,
-        allow_plus: AllowPlus,
-        ty: &Ty,
-    ) -> PResult<'a, ()> {
+    pub(super) fn maybe_recover_from_bad_type_plus(&mut self, ty: &Ty) -> PResult<'a, ()> {
         // Do not add `+` to expected tokens.
-        if matches!(allow_plus, AllowPlus::No) || !self.token.is_like_plus() {
+        if !self.token.is_like_plus() {
             return Ok(());
         }
 
@@ -1289,11 +1347,9 @@ impl<'a> Parser<'a> {
         let bounds = self.parse_generic_bounds(None)?;
         let sum_span = ty.span.to(self.prev_token.span);
 
-        let sum_with_parens: String;
-
         let sub = match ty.kind {
             TyKind::Rptr(ref lifetime, ref mut_ty) => {
-                sum_with_parens = pprust::to_string(|s| {
+                let sum_with_parens = pprust::to_string(|s| {
                     s.s.word("&");
                     s.print_opt_lifetime(lifetime);
                     s.print_mutability(mut_ty.mutbl, false);
@@ -1303,7 +1359,7 @@ impl<'a> Parser<'a> {
                     s.pclose()
                 });
 
-                BadTypePlusSub::AddParen { sum_with_parens: &sum_with_parens, span: sum_span }
+                BadTypePlusSub::AddParen { sum_with_parens, span: sum_span }
             }
             TyKind::Ptr(..) | TyKind::BareFn(..) => BadTypePlusSub::ForgotParen { span: sum_span },
             _ => BadTypePlusSub::ExpectPath { span: sum_span },
@@ -1449,10 +1505,9 @@ impl<'a> Parser<'a> {
     pub(super) fn maybe_recover_from_bad_qpath<T: RecoverQPath>(
         &mut self,
         base: P<T>,
-        allow_recovery: bool,
     ) -> PResult<'a, P<T>> {
         // Do not add `::` to expected tokens.
-        if allow_recovery && self.token == token::ModSep {
+        if self.token == token::ModSep {
             if let Some(ty) = base.to_ty() {
                 return self.maybe_recover_from_bad_qpath_stage_2(ty.span, ty);
             }
@@ -1474,15 +1529,10 @@ impl<'a> Parser<'a> {
         path.span = ty_span.to(self.prev_token.span);
 
         let ty_str = self.span_to_snippet(ty_span).unwrap_or_else(|_| pprust::ty_to_string(&ty));
-        self.struct_span_err(path.span, "missing angle brackets in associated item path")
-            .span_suggestion(
-                // This is a best-effort recovery.
-                path.span,
-                "try",
-                format!("<{}>::{}", ty_str, pprust::path_to_string(&path)),
-                Applicability::MaybeIncorrect,
-            )
-            .emit();
+        self.sess.emit_err(BadQPathStage2 {
+            span: path.span,
+            ty: format!("<{}>::{}", ty_str, pprust::path_to_string(&path)),
+        });
 
         let path_span = ty_span.shrink_to_hi(); // Use an empty path since `position == 0`.
         Ok(P(T::recovered(Some(QSelf { ty, path_span, position: 0 }), path)))
@@ -1491,13 +1541,10 @@ impl<'a> Parser<'a> {
     pub fn maybe_consume_incorrect_semicolon(&mut self, items: &[P<Item>]) -> bool {
         if self.token.kind == TokenKind::Semi {
             self.bump();
-            let mut err = self.struct_span_err(self.prev_token.span, "expected item, found `;`");
-            err.span_suggestion_short(
-                self.prev_token.span,
-                "remove this semicolon",
-                String::new(),
-                Applicability::MachineApplicable,
-            );
+
+            let mut err =
+                IncorrectSemicolon { span: self.prev_token.span, opt_help: None, name: "" };
+
             if !items.is_empty() {
                 let previous_item = &items[items.len() - 1];
                 let previous_item_kind_name = match previous_item.kind {
@@ -1510,10 +1557,11 @@ impl<'a> Parser<'a> {
                     _ => None,
                 };
                 if let Some(name) = previous_item_kind_name {
-                    err.help(&format!("{name} declarations are not followed by a semicolon"));
+                    err.opt_help = Some(());
+                    err.name = name;
                 }
             }
-            err.emit();
+            self.sess.emit_err(err);
             true
         } else {
             false
@@ -1598,7 +1646,7 @@ impl<'a> Parser<'a> {
             _ => ExprKind::Await(expr),
         };
         let expr = self.mk_expr(lo.to(sp), kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     fn recover_await_macro(&mut self) -> PResult<'a, (Span, P<Expr>, bool)> {
@@ -1627,18 +1675,20 @@ impl<'a> Parser<'a> {
     }
 
     fn error_on_incorrect_await(&self, lo: Span, hi: Span, expr: &Expr, is_question: bool) -> Span {
-        let expr_str =
-            self.span_to_snippet(expr.span).unwrap_or_else(|_| pprust::expr_to_string(&expr));
-        let suggestion = format!("{}.await{}", expr_str, if is_question { "?" } else { "" });
-        let sp = lo.to(hi);
-        let app = match expr.kind {
+        let span = lo.to(hi);
+        let applicability = match expr.kind {
             ExprKind::Try(_) => Applicability::MaybeIncorrect, // `await <expr>?`
             _ => Applicability::MachineApplicable,
         };
-        self.struct_span_err(sp, "incorrect use of `await`")
-            .span_suggestion(sp, "`await` is a postfix operation", suggestion, app)
-            .emit();
-        sp
+
+        self.sess.emit_err(IncorrectAwait {
+            span,
+            sugg_span: (span, applicability),
+            expr: self.span_to_snippet(expr.span).unwrap_or_else(|_| pprust::expr_to_string(&expr)),
+            question_mark: if is_question { "?" } else { "" },
+        });
+
+        span
     }
 
     /// If encountering `future.await()`, consumes and emits an error.
@@ -1649,16 +1699,10 @@ impl<'a> Parser<'a> {
             // future.await()
             let lo = self.token.span;
             self.bump(); // (
-            let sp = lo.to(self.token.span);
+            let span = lo.to(self.token.span);
             self.bump(); // )
-            self.struct_span_err(sp, "incorrect use of `await`")
-                .span_suggestion(
-                    sp,
-                    "`await` is not a method call, remove the parentheses",
-                    String::new(),
-                    Applicability::MachineApplicable,
-                )
-                .emit();
+
+            self.sess.emit_err(IncorrectUseOfAwait { span });
         }
     }
 
@@ -1687,7 +1731,7 @@ impl<'a> Parser<'a> {
                     Applicability::MachineApplicable,
                 );
             }
-            err.span_suggestion(lo.shrink_to_lo(), &format!("{prefix}you can still access the deprecated `try!()` macro using the \"raw identifier\" syntax"), "r#".to_string(), Applicability::MachineApplicable);
+            err.span_suggestion(lo.shrink_to_lo(), &format!("{prefix}you can still access the deprecated `try!()` macro using the \"raw identifier\" syntax"), "r#", Applicability::MachineApplicable);
             err.emit();
             Ok(self.mk_expr_err(lo.to(hi)))
         } else {
@@ -1930,14 +1974,10 @@ impl<'a> Parser<'a> {
     pub(super) fn check_for_for_in_in_typo(&mut self, in_span: Span) {
         if self.eat_keyword(kw::In) {
             // a common typo: `for _ in in bar {}`
-            self.struct_span_err(self.prev_token.span, "expected iterable, found keyword `in`")
-                .span_suggestion_short(
-                    in_span.until(self.prev_token.span),
-                    "remove the duplicated `in`",
-                    String::new(),
-                    Applicability::MachineApplicable,
-                )
-                .emit();
+            self.sess.emit_err(InInTypo {
+                span: self.prev_token.span,
+                sugg_span: in_span.until(self.prev_token.span),
+            });
         }
     }
 
@@ -1987,7 +2027,7 @@ impl<'a> Parser<'a> {
             err.span_suggestion(
                 span,
                 "declare the type after the parameter binding",
-                String::from("<identifier>: <type>"),
+                "<identifier>: <type>",
                 Applicability::HasPlaceholders,
             );
             return Some(ident);
@@ -2002,9 +2042,9 @@ impl<'a> Parser<'a> {
                 match pat.kind {
                     PatKind::Ident(_, ident, _) => (
                         ident,
-                        "self: ".to_string(),
+                        "self: ",
                         ": TypeName".to_string(),
-                        "_: ".to_string(),
+                        "_: ",
                         pat.span.shrink_to_lo(),
                         pat.span.shrink_to_hi(),
                         pat.span.shrink_to_lo(),
@@ -2018,9 +2058,9 @@ impl<'a> Parser<'a> {
                                 let mutab = mutab.prefix_str();
                                 (
                                     ident,
-                                    "self: ".to_string(),
+                                    "self: ",
                                     format!("{ident}: &{mutab}TypeName"),
-                                    "_: ".to_string(),
+                                    "_: ",
                                     pat.span.shrink_to_lo(),
                                     pat.span,
                                     pat.span.shrink_to_lo(),
@@ -2092,7 +2132,7 @@ impl<'a> Parser<'a> {
         .span_suggestion_short(
             pat.span,
             "give this argument a name or use an underscore to ignore it",
-            "_".to_owned(),
+            "_",
             Applicability::MachineApplicable,
         )
         .emit();
@@ -2326,7 +2366,7 @@ impl<'a> Parser<'a> {
             err.span_suggestion_verbose(
                 start.until(self.token.span),
                 "the `const` keyword is only needed in the definition of the type",
-                String::new(),
+                "",
                 Applicability::MaybeIncorrect,
             );
             err.emit();
@@ -2384,7 +2424,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion(
                         snapshot.token.span,
                         "if you meant to use an associated type binding, replace `==` with `=`",
-                        "=".to_string(),
+                        "=",
                         Applicability::MaybeIncorrect,
                     );
                     let value = self.mk_expr_err(start.to(expr.span));
@@ -2398,7 +2438,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion(
                         snapshot.token.span,
                         "write a path separator here",
-                        "::".to_string(),
+                        "::",
                         Applicability::MaybeIncorrect,
                     );
                     err.emit();
@@ -2451,7 +2491,7 @@ impl<'a> Parser<'a> {
         err.span_suggestion_verbose(
             move_async_span,
             "try switching the order",
-            "async move".to_owned(),
+            "async move",
             Applicability::MaybeIncorrect,
         );
         err
@@ -2462,10 +2502,9 @@ impl<'a> Parser<'a> {
     pub(crate) fn maybe_recover_colon_colon_in_pat_typo(
         &mut self,
         mut first_pat: P<Pat>,
-        ra: RecoverColon,
         expected: Expected,
     ) -> P<Pat> {
-        if RecoverColon::Yes != ra || token::Colon != self.token.kind {
+        if token::Colon != self.token.kind {
             return first_pat;
         }
         if !matches!(first_pat.kind, PatKind::Ident(_, _, None) | PatKind::Path(..))
@@ -2557,7 +2596,7 @@ impl<'a> Parser<'a> {
                             err.span_suggestion(
                                 span,
                                 "maybe write a path separator here",
-                                "::".to_string(),
+                                "::",
                                 Applicability::MaybeIncorrect,
                             );
                         } else {
@@ -2587,7 +2626,7 @@ impl<'a> Parser<'a> {
         err.tool_only_span_suggestion(
             label.ident.span.until(self.token.span),
             "remove this block label",
-            String::new(),
+            "",
             Applicability::MachineApplicable,
         );
         err.emit();
@@ -2599,10 +2638,9 @@ impl<'a> Parser<'a> {
     pub(crate) fn maybe_recover_unexpected_comma(
         &mut self,
         lo: Span,
-        rc: RecoverComma,
         rt: CommaRecoveryMode,
     ) -> PResult<'a, ()> {
-        if rc == RecoverComma::No || self.token != token::Comma {
+        if self.token != token::Comma {
             return Ok(());
         }
 
@@ -2661,7 +2699,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion(
                         between_span,
                         "use single colon",
-                        ": ".to_owned(),
+                        ": ",
                         Applicability::MachineApplicable,
                     );
                     return Err(err);

@@ -14,10 +14,9 @@ pub struct Condvar {
 
 impl Condvar {
     /// Creates a new condition variable for use.
-    pub fn new() -> Self {
-        let mut c = imp::MovableCondvar::from(imp::Condvar::new());
-        unsafe { c.init() };
-        Self { inner: c, check: CondvarCheck::new() }
+    #[inline]
+    pub const fn new() -> Self {
+        Self { inner: imp::MovableCondvar::new(), check: CondvarCheck::new() }
     }
 
     /// Signals one waiter on this condition variable to wake up.
@@ -53,11 +52,5 @@ impl Condvar {
     pub unsafe fn wait_timeout(&self, mutex: &MovableMutex, dur: Duration) -> bool {
         self.check.verify(mutex);
         self.inner.wait_timeout(mutex.raw(), dur)
-    }
-}
-
-impl Drop for Condvar {
-    fn drop(&mut self) {
-        unsafe { self.inner.destroy() };
     }
 }

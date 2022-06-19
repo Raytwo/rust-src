@@ -7,7 +7,6 @@ use crate::{BuiltinMacroState, Determinacy};
 use crate::{DeriveData, Finalize, ParentScope, ResolutionError, Resolver, ScopeSet};
 use crate::{ModuleKind, ModuleOrUniformRoot, NameBinding, PathResult, Segment};
 use rustc_ast::{self as ast, Inline, ItemKind, ModKind, NodeId};
-use rustc_ast_lowering::ResolverAstLowering;
 use rustc_ast_pretty::pprust;
 use rustc_attr::StabilityLevel;
 use rustc_data_structures::fx::FxHashSet;
@@ -443,11 +442,22 @@ impl<'a> ResolverExpand for Resolver<'a> {
                 PathResult::NonModule(partial_res) if partial_res.unresolved_segments() == 0 => {
                     return Ok(true);
                 }
+                PathResult::NonModule(..) |
+                // HACK(Urgau): This shouldn't be necessary
+                PathResult::Failed { is_error_from_last_segment: false, .. } => {
+                    self.session
+                        .struct_span_err(span, "not sure whether the path is accessible or not")
+                        .note("the type may have associated items, but we are currently not checking them")
+                        .emit();
+
+                    // If we get a partially resolved NonModule in one namespace, we should get the
+                    // same result in any other namespaces, so we can return early.
+                    return Ok(false);
+                }
                 PathResult::Indeterminate => indeterminate = true,
-                // FIXME: `resolve_path` is not ready to report partially resolved paths
-                // correctly, so we just report an error if the path was reported as unresolved.
-                // This needs to be fixed for `cfg_accessible` to be useful.
-                PathResult::NonModule(..) | PathResult::Failed { .. } => {}
+                // We can only be sure that a path doesn't exist after having tested all the
+                // posibilities, only at that time we can return false.
+                PathResult::Failed { .. } => {}
                 PathResult::Module(_) => panic!("unexpected path resolution"),
             }
         }
@@ -456,10 +466,6 @@ impl<'a> ResolverExpand for Resolver<'a> {
             return Err(Indeterminate);
         }
 
-        self.session
-            .struct_span_err(span, "not sure whether the path is accessible or not")
-            .span_note(span, "`cfg_accessible` is not fully implemented")
-            .emit();
         Ok(false)
     }
 
@@ -651,7 +657,7 @@ impl<'a> Resolver<'a> {
             res
         };
 
-        res.map(|res| (self.get_macro(res), res))
+        res.map(|res| (self.get_macro(res).map(|macro_data| macro_data.ext), res))
     }
 
     pub(crate) fn finalize_macro_resolutions(&mut self) {
@@ -846,7 +852,7 @@ impl<'a> Resolver<'a> {
         // Reserve some names that are not quite covered by the general check
         // performed on `Resolver::builtin_attrs`.
         if ident.name == sym::cfg || ident.name == sym::cfg_attr {
-            let macro_kind = self.get_macro(res).map(|ext| ext.macro_kind());
+            let macro_kind = self.get_macro(res).map(|macro_data| macro_data.ext.macro_kind());
             if macro_kind.is_some() && sub_namespace_match(macro_kind, Some(MacroKind::Attr)) {
                 self.session.span_err(
                     ident.span,
@@ -863,7 +869,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         item: &ast::Item,
         edition: Edition,
-    ) -> (SyntaxExtension, Vec<Span>) {
+    ) -> (SyntaxExtension, Vec<(usize, Span)>) {
         let (mut result, mut rule_spans) = compile_declarative_macro(
             &self.session,
             self.session.features_untracked(),

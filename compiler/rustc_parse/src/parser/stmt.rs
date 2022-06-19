@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
         } else {
             // Since none of the above applied, this is an expression statement macro.
             let e = self.mk_expr(lo.to(hi), ExprKind::MacCall(mac), AttrVec::new());
-            let e = self.maybe_recover_from_bad_qpath(e, true)?;
+            let e = self.maybe_recover_from_bad_qpath(e)?;
             let e = self.parse_dot_or_call_expr_with(e, lo, attrs.into())?;
             let e = self.parse_assoc_expr_with(0, LhsExpr::AlreadyParsed(e))?;
             StmtKind::Expr(e)
@@ -209,7 +209,7 @@ impl<'a> Parser<'a> {
     ) -> PResult<'a, Stmt> {
         let stmt = self.recover_local_after_let(lo, attrs)?;
         self.struct_span_err(lo, "invalid variable declaration")
-            .span_suggestion(lo, msg, sugg.to_string(), Applicability::MachineApplicable)
+            .span_suggestion(lo, msg, sugg, Applicability::MachineApplicable)
             .emit();
         Ok(stmt)
     }
@@ -260,7 +260,10 @@ impl<'a> Parser<'a> {
                     if let Ok(snip) = self.span_to_snippet(pat.span) {
                         err.span_label(pat.span, format!("while parsing the type for `{}`", snip));
                     }
-                    let err = if self.check(&token::Eq) {
+                    // we use noexpect here because we don't actually expect Eq to be here
+                    // but we are still checking for it in order to be able to handle it if
+                    // it is there
+                    let err = if self.check_noexpect(&token::Eq) {
                         err.emit();
                         None
                     } else {
@@ -287,7 +290,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion_short(
                     colon_sp,
                     "use `=` if you meant to assign",
-                    " =".to_string(),
+                    " =",
                     Applicability::MachineApplicable,
                 );
                 err.emit();
@@ -391,7 +394,7 @@ impl<'a> Parser<'a> {
                 .span_suggestion_short(
                     self.token.span,
                     "initialize the variable",
-                    "=".to_string(),
+                    "=",
                     Applicability::MaybeIncorrect,
                 )
                 .help("if you meant to overwrite, remove the `let` binding")
@@ -429,10 +432,23 @@ impl<'a> Parser<'a> {
         //
         // which is valid in other languages, but not Rust.
         match self.parse_stmt_without_recovery(false, ForceCollect::No) {
-            // If the next token is an open brace (e.g., `if a b {`), the place-
-            // inside-a-block suggestion would be more likely wrong than right.
+            // If the next token is an open brace, e.g., we have:
+            //
+            //     if expr other_expr {
+            //        ^    ^          ^- lookahead(1) is a brace
+            //        |    |- current token is not "else"
+            //        |- (statement we just parsed)
+            //
+            // the place-inside-a-block suggestion would be more likely wrong than right.
+            //
+            // FIXME(compiler-errors): this should probably parse an arbitrary expr and not
+            // just lookahead one token, so we can see if there's a brace after _that_,
+            // since we want to protect against:
+            //     `if 1 1 + 1 {` being suggested as  `if { 1 } 1 + 1 {`
+            //                                            +   +
             Ok(Some(_))
-                if self.look_ahead(1, |t| t == &token::OpenDelim(Delimiter::Brace))
+                if (!self.token.is_keyword(kw::Else)
+                    && self.look_ahead(1, |t| t == &token::OpenDelim(Delimiter::Brace)))
                     || do_not_suggest_help => {}
             // Do not suggest `if foo println!("") {;}` (as would be seen in test for #46836).
             Ok(Some(Stmt { kind: StmtKind::Empty, .. })) => {}

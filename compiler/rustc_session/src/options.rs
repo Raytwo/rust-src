@@ -178,9 +178,6 @@ top_level_options!(
 
         debugging_opts: DebuggingOptions [SUBSTRUCT],
         prints: Vec<PrintRequest> [UNTRACKED],
-        /// Determines which borrow checker(s) to run. This is the parsed, sanitized
-        /// version of `debugging_opts.borrowck`, which is just a plain string.
-        borrowck_mode: BorrowckMode [UNTRACKED],
         cg: CodegenOptions [SUBSTRUCT],
         externs: Externs [UNTRACKED],
         crate_name: Option<String> [TRACKED],
@@ -581,7 +578,7 @@ mod parse {
     pub(crate) fn parse_threads(slot: &mut usize, v: Option<&str>) -> bool {
         match v.and_then(|s| s.parse().ok()) {
             Some(0) => {
-                *slot = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+                *slot = ::num_cpus::get();
                 true
             }
             Some(i) => {
@@ -1207,15 +1204,9 @@ options! {
     assert_incr_state: Option<String> = (None, parse_opt_string, [UNTRACKED],
         "assert that the incremental cache is in given state: \
          either `loaded` or `not-loaded`."),
-    ast_json: bool = (false, parse_bool, [UNTRACKED],
-        "print the AST as JSON and halt (default: no)"),
-    ast_json_noexpand: bool = (false, parse_bool, [UNTRACKED],
-        "print the pre-expansion AST as JSON and halt (default: no)"),
     binary_dep_depinfo: bool = (false, parse_bool, [TRACKED],
         "include artifacts (sysroot, crate dependencies) used during compilation in dep-info \
         (default: no)"),
-    borrowck: String = ("migrate".to_string(), parse_string, [UNTRACKED],
-        "select which borrowck is used (`mir` or `migrate`) (default: `migrate`)"),
     branch_protection: Option<BranchProtection> = (None, parse_branch_protection, [TRACKED],
         "set options for branch target identification and pointer authentication on AArch64"),
     cf_protection: CFProtection = (CFProtection::None, parse_cfprotection, [TRACKED],
@@ -1482,6 +1473,12 @@ options! {
         for example: `-Z self-profile-events=default,query-keys`
         all options: none, all, default, generic-activity, query-provider, query-cache-hit
                      query-blocked, incr-cache-load, incr-result-hashing, query-keys, function-args, args, llvm, artifact-sizes"),
+    self_profile_counter: String = ("wall-time".to_string(), parse_string, [UNTRACKED],
+        "counter used by the self profiler (default: `wall-time`), one of:
+        `wall-time` (monotonic clock, i.e. `std::time::Instant`)
+        `instructions:u` (retired instructions, userspace-only)
+        `instructions-minus-irqs:u` (subtracting hardware interrupt counts for extra accuracy)"
+    ),
     share_generics: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "make the current crate share its generic instantiations"),
     show_span: Option<String> = (None, parse_opt_string, [TRACKED],
@@ -1495,6 +1492,8 @@ options! {
         "hash algorithm of source files in debug info (`md5`, `sha1`, or `sha256`)"),
     stack_protector: StackProtector = (StackProtector::None, parse_stack_protector, [TRACKED],
         "control stack smash protection strategy (`rustc --print stack-protector-strategies` for details)"),
+    strict_init_checks: bool = (false, parse_bool, [TRACKED],
+        "control if mem::uninitialized and mem::zeroed panic on more UB"),
     strip: Strip = (Strip::None, parse_strip, [UNTRACKED],
         "tell the linker which information to strip (`none` (default), `debuginfo` or `symbols`)"),
     split_dwarf_kind: SplitDwarfKind = (SplitDwarfKind::Split, parse_split_dwarf_kind, [UNTRACKED],
@@ -1548,6 +1547,8 @@ options! {
         "choose the TLS model to use (`rustc --print tls-models` for details)"),
     trace_macros: bool = (false, parse_bool, [UNTRACKED],
         "for every macro invocation, print its name and arguments (default: no)"),
+    translate_remapped_path_to_local_path: bool = (true, parse_bool, [TRACKED],
+        "translate remapped paths into local paths when possible (default: yes)"),
     trap_unreachable: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "generate trap instructions for unreachable intrinsics (default: use target setting, usually yes)"),
     treat_err_as_bug: Option<NonZeroUsize> = (None, parse_treat_err_as_bug, [TRACKED],
@@ -1584,6 +1585,9 @@ options! {
         "in general, enable more debug printouts (default: no)"),
     verify_llvm_ir: bool = (false, parse_bool, [TRACKED],
         "verify LLVM IR (default: no)"),
+    virtual_function_elimination: bool = (false, parse_bool, [TRACKED],
+        "enables dead virtual function elimination optimization. \
+        Requires `-Clto[=[fat,yes]]`"),
     wasi_exec_model: Option<WasiExecModel> = (None, parse_wasi_exec_model, [TRACKED],
         "whether to build a wasi command or reactor"),
 

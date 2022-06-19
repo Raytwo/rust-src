@@ -10,24 +10,24 @@ use crate::imports::{Import, ImportKind};
 use crate::macros::{MacroRulesBinding, MacroRulesScope, MacroRulesScopeRef};
 use crate::Namespace::{self, MacroNS, TypeNS, ValueNS};
 use crate::{Determinacy, ExternPreludeEntry, Finalize, Module, ModuleKind, ModuleOrUniformRoot};
-use crate::{NameBinding, NameBindingKind, ParentScope, PathResult, PerNS, ResolutionError};
+use crate::{
+    MacroData, NameBinding, NameBindingKind, ParentScope, PathResult, PerNS, ResolutionError,
+};
 use crate::{Resolver, ResolverArenas, Segment, ToNameBinding, VisResolutionError};
 
 use rustc_ast::visit::{self, AssocCtxt, Visitor};
 use rustc_ast::{self as ast, AssocItem, AssocItemKind, MetaItemKind, StmtKind};
 use rustc_ast::{Block, Fn, ForeignItem, ForeignItemKind, Impl, Item, ItemKind, NodeId};
-use rustc_ast_lowering::ResolverAstLowering;
 use rustc_attr as attr;
 use rustc_data_structures::sync::Lrc;
 use rustc_errors::{struct_span_err, Applicability};
-use rustc_expand::base::SyntaxExtension;
 use rustc_expand::expand::AstFragment;
 use rustc_hir::def::{self, *};
 use rustc_hir::def_id::{DefId, LocalDefId, CRATE_DEF_ID};
 use rustc_metadata::creader::LoadedMacro;
 use rustc_middle::bug;
 use rustc_middle::metadata::ModChild;
-use rustc_middle::ty;
+use rustc_middle::ty::{self, DefIdTree};
 use rustc_session::cstore::CrateStore;
 use rustc_span::hygiene::{ExpnId, LocalExpnId, MacroKind};
 use rustc_span::source_map::{respan, Spanned};
@@ -112,10 +112,7 @@ impl<'a> Resolver<'a> {
         loop {
             match self.get_module(def_id) {
                 Some(module) => return module,
-                None => {
-                    def_id.index =
-                        self.def_key(def_id).parent.expect("non-root `DefId` without parent")
-                }
+                None => def_id = self.parent(def_id),
             }
         }
     }
@@ -180,26 +177,32 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    pub(crate) fn get_macro(&mut self, res: Res) -> Option<Lrc<SyntaxExtension>> {
+    pub(crate) fn get_macro(&mut self, res: Res) -> Option<MacroData> {
         match res {
             Res::Def(DefKind::Macro(..), def_id) => Some(self.get_macro_by_def_id(def_id)),
-            Res::NonMacroAttr(_) => Some(self.non_macro_attr.clone()),
+            Res::NonMacroAttr(_) => {
+                Some(MacroData { ext: self.non_macro_attr.clone(), macro_rules: false })
+            }
             _ => None,
         }
     }
 
-    pub(crate) fn get_macro_by_def_id(&mut self, def_id: DefId) -> Lrc<SyntaxExtension> {
-        if let Some(ext) = self.macro_map.get(&def_id) {
-            return ext.clone();
+    pub(crate) fn get_macro_by_def_id(&mut self, def_id: DefId) -> MacroData {
+        if let Some(macro_data) = self.macro_map.get(&def_id) {
+            return macro_data.clone();
         }
 
-        let ext = Lrc::new(match self.cstore().load_macro_untracked(def_id, &self.session) {
-            LoadedMacro::MacroDef(item, edition) => self.compile_macro(&item, edition).0,
-            LoadedMacro::ProcMacro(ext) => ext,
-        });
+        let (ext, macro_rules) = match self.cstore().load_macro_untracked(def_id, &self.session) {
+            LoadedMacro::MacroDef(item, edition) => (
+                Lrc::new(self.compile_macro(&item, edition).0),
+                matches!(item.kind, ItemKind::MacroDef(def) if def.macro_rules),
+            ),
+            LoadedMacro::ProcMacro(extz) => (Lrc::new(extz), false),
+        };
 
-        self.macro_map.insert(def_id, ext.clone());
-        ext
+        let macro_data = MacroData { ext, macro_rules };
+        self.macro_map.insert(def_id, macro_data.clone());
+        macro_data
     }
 
     pub(crate) fn build_reduced_graph(
@@ -249,9 +252,6 @@ impl<'a, 'b> BuildReducedGraphVisitor<'a, 'b> {
         let parent_scope = &self.parent_scope;
         match vis.kind {
             ast::VisibilityKind::Public => Ok(ty::Visibility::Public),
-            ast::VisibilityKind::Crate(..) => {
-                Ok(ty::Visibility::Restricted(CRATE_DEF_ID.to_def_id()))
-            }
             ast::VisibilityKind::Inherited => {
                 Ok(match self.parent_scope.module.kind {
                     // Any inherited visibility resolved directly inside an enum or trait
@@ -1223,12 +1223,12 @@ impl<'a, 'b> BuildReducedGraphVisitor<'a, 'b> {
         ident: Ident,
         def_id: LocalDefId,
         node_id: NodeId,
-        rule_spans: &[Span],
+        rule_spans: &[(usize, Span)],
     ) {
         if !ident.as_str().starts_with('_') {
             self.r.unused_macros.insert(def_id, (node_id, ident));
-            for (rule_i, rule_span) in rule_spans.iter().enumerate() {
-                self.r.unused_macro_rules.insert((def_id, rule_i), (ident, *rule_span));
+            for (rule_i, rule_span) in rule_spans.iter() {
+                self.r.unused_macro_rules.insert((def_id, *rule_i), (ident, *rule_span));
             }
         }
     }
@@ -1254,7 +1254,7 @@ impl<'a, 'b> BuildReducedGraphVisitor<'a, 'b> {
         };
 
         let res = Res::Def(DefKind::Macro(ext.macro_kind()), def_id.to_def_id());
-        self.r.macro_map.insert(def_id.to_def_id(), ext);
+        self.r.macro_map.insert(def_id.to_def_id(), MacroData { ext, macro_rules });
         self.r.local_macro_def_scopes.insert(def_id, parent_scope.module);
 
         if macro_rules {

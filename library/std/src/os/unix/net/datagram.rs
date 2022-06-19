@@ -1,24 +1,7 @@
-#[cfg(any(
-    doc,
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "emscripten",
-    target_os = "freebsd",
-    target_os = "linux",
-    target_os = "netbsd",
-    target_os = "openbsd",
-))]
+#[cfg(any(doc, target_os = "android", target_os = "linux"))]
 use super::{recv_vectored_with_ancillary_from, send_vectored_with_ancillary_to, SocketAncillary};
 use super::{sockaddr_un, SocketAddr};
-#[cfg(any(
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "emscripten",
-    target_os = "freebsd",
-    target_os = "linux",
-    target_os = "netbsd",
-    target_os = "openbsd",
-))]
+#[cfg(any(doc, target_os = "android", target_os = "linux"))]
 use crate::io::{IoSlice, IoSliceMut};
 use crate::net::Shutdown;
 use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
@@ -403,7 +386,8 @@ impl UnixDatagram {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(any(target_os = "android", target_os = "linux"), doc = "```no_run")]
+    #[cfg_attr(not(any(target_os = "android", target_os = "linux")), doc = "```ignore")]
     /// #![feature(unix_socket_ancillary_data)]
     /// use std::os::unix::net::{UnixDatagram, SocketAncillary, AncillaryData};
     /// use std::io::IoSliceMut;
@@ -433,15 +417,7 @@ impl UnixDatagram {
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "emscripten",
-        target_os = "freebsd",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_os = "openbsd",
-    ))]
+    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
     #[unstable(feature = "unix_socket_ancillary_data", issue = "76915")]
     pub fn recv_vectored_with_ancillary_from(
         &self,
@@ -460,7 +436,8 @@ impl UnixDatagram {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(any(target_os = "android", target_os = "linux"), doc = "```no_run")]
+    #[cfg_attr(not(any(target_os = "android", target_os = "linux")), doc = "```ignore")]
     /// #![feature(unix_socket_ancillary_data)]
     /// use std::os::unix::net::{UnixDatagram, SocketAncillary, AncillaryData};
     /// use std::io::IoSliceMut;
@@ -490,15 +467,7 @@ impl UnixDatagram {
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "emscripten",
-        target_os = "freebsd",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_os = "openbsd",
-    ))]
+    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
     #[unstable(feature = "unix_socket_ancillary_data", issue = "76915")]
     pub fn recv_vectored_with_ancillary(
         &self,
@@ -609,7 +578,8 @@ impl UnixDatagram {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(any(target_os = "android", target_os = "linux"), doc = "```no_run")]
+    #[cfg_attr(not(any(target_os = "android", target_os = "linux")), doc = "```ignore")]
     /// #![feature(unix_socket_ancillary_data)]
     /// use std::os::unix::net::{UnixDatagram, SocketAncillary};
     /// use std::io::IoSlice;
@@ -633,15 +603,7 @@ impl UnixDatagram {
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "emscripten",
-        target_os = "freebsd",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_os = "openbsd",
-    ))]
+    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
     #[unstable(feature = "unix_socket_ancillary_data", issue = "76915")]
     pub fn send_vectored_with_ancillary_to<P: AsRef<Path>>(
         &self,
@@ -658,7 +620,8 @@ impl UnixDatagram {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    #[cfg_attr(any(target_os = "android", target_os = "linux"), doc = "```no_run")]
+    #[cfg_attr(not(any(target_os = "android", target_os = "linux")), doc = "```ignore")]
     /// #![feature(unix_socket_ancillary_data)]
     /// use std::os::unix::net::{UnixDatagram, SocketAncillary};
     /// use std::io::IoSlice;
@@ -682,15 +645,7 @@ impl UnixDatagram {
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "emscripten",
-        target_os = "freebsd",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_os = "openbsd",
-    ))]
+    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
     #[unstable(feature = "unix_socket_ancillary_data", issue = "76915")]
     pub fn send_vectored_with_ancillary(
         &self,
@@ -1007,7 +962,7 @@ impl IntoRawFd for UnixDatagram {
     }
 }
 
-#[unstable(feature = "io_safety", issue = "87074")]
+#[stable(feature = "io_safety", since = "1.63.0")]
 impl AsFd for UnixDatagram {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -1015,7 +970,7 @@ impl AsFd for UnixDatagram {
     }
 }
 
-#[unstable(feature = "io_safety", issue = "87074")]
+#[stable(feature = "io_safety", since = "1.63.0")]
 impl From<UnixDatagram> for OwnedFd {
     #[inline]
     fn from(unix_datagram: UnixDatagram) -> OwnedFd {
@@ -1023,7 +978,7 @@ impl From<UnixDatagram> for OwnedFd {
     }
 }
 
-#[unstable(feature = "io_safety", issue = "87074")]
+#[stable(feature = "io_safety", since = "1.63.0")]
 impl From<OwnedFd> for UnixDatagram {
     #[inline]
     fn from(owned: OwnedFd) -> Self {

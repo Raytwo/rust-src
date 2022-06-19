@@ -15,12 +15,14 @@ use rustc_hir::def::{CtorOf, DefKind, Res};
 use rustc_hir::pat_util::EnumerateAndAdjustIterator;
 use rustc_hir::RangeEnd;
 use rustc_index::vec::Idx;
-use rustc_middle::mir::interpret::{get_slice_bytes, ConstValue};
-use rustc_middle::mir::interpret::{ErrorHandled, LitToConstError, LitToConstInput};
+use rustc_middle::mir::interpret::{
+    ConstValue, ErrorHandled, LitToConstError, LitToConstInput, Scalar,
+};
 use rustc_middle::mir::{self, UserTypeProjection};
 use rustc_middle::mir::{BorrowKind, Field, Mutability};
-use rustc_middle::thir::{Ascription, BindingMode, FieldPat, Pat, PatKind, PatRange, PatTyProj};
+use rustc_middle::thir::{Ascription, BindingMode, FieldPat, LocalVarId, Pat, PatKind, PatRange};
 use rustc_middle::ty::subst::{GenericArg, SubstsRef};
+use rustc_middle::ty::CanonicalUserTypeAnnotation;
 use rustc_middle::ty::{self, AdtDef, ConstKind, DefIdTree, Region, Ty, TyCtxt, UserType};
 use rustc_span::{Span, Symbol};
 
@@ -128,7 +130,7 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
     ) -> PatKind<'tcx> {
         assert_eq!(lo.ty(), ty);
         assert_eq!(hi.ty(), ty);
-        let cmp = compare_const_vals(self.tcx, lo, hi, self.param_env, ty);
+        let cmp = compare_const_vals(self.tcx, lo, hi, self.param_env);
         match (end, cmp) {
             // `x..y` where `x < y`.
             // Non-empty because the range includes at least `x`.
@@ -184,11 +186,11 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
             }
             (Some(PatKind::Constant { value: lo }), None) => {
                 let hi = ty.numeric_max_val(self.tcx)?;
-                Some((*lo, hi.into()))
+                Some((*lo, mir::ConstantKind::from_const(hi, self.tcx)))
             }
             (None, Some(PatKind::Constant { value: hi })) => {
                 let lo = ty.numeric_min_val(self.tcx)?;
-                Some((lo.into(), *hi))
+                Some((mir::ConstantKind::from_const(lo, self.tcx), *hi))
             }
             _ => None,
         }
@@ -227,7 +229,8 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
                 for end in &[lo, hi] {
                     if let Some((_, Some(ascription))) = end {
                         let subpattern = Pat { span: pat.span, ty, kind: Box::new(kind) };
-                        kind = PatKind::AscribeUserType { ascription: *ascription, subpattern };
+                        kind =
+                            PatKind::AscribeUserType { ascription: ascription.clone(), subpattern };
                     }
                 }
 
@@ -286,7 +289,7 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
                     mutability,
                     mode,
                     name: ident.name,
-                    var: id,
+                    var: LocalVarId(id),
                     ty: var_ty,
                     subpattern: self.lower_opt_pattern(sub),
                     is_primary: id == pat.hir_id,
@@ -432,13 +435,14 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
 
         if let Some(user_ty) = self.user_substs_applied_to_ty_of_hir_id(hir_id) {
             debug!("lower_variant_or_leaf: kind={:?} user_ty={:?} span={:?}", kind, user_ty, span);
+            let annotation = CanonicalUserTypeAnnotation {
+                user_ty,
+                span,
+                inferred_ty: self.typeck_results.node_type(hir_id),
+            };
             kind = PatKind::AscribeUserType {
                 subpattern: Pat { span, ty, kind: Box::new(kind) },
-                ascription: Ascription {
-                    user_ty: PatTyProj::from_user_type(user_ty),
-                    user_ty_span: span,
-                    variance: ty::Variance::Covariant,
-                },
+                ascription: Ascription { annotation, variance: ty::Variance::Covariant },
             };
         }
 
@@ -499,18 +503,21 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
                 }
 
                 let user_provided_types = self.typeck_results().user_provided_types();
-                if let Some(u_ty) = user_provided_types.get(id) {
-                    let user_ty = PatTyProj::from_user_type(*u_ty);
+                if let Some(&user_ty) = user_provided_types.get(id) {
+                    let annotation = CanonicalUserTypeAnnotation {
+                        user_ty,
+                        span,
+                        inferred_ty: self.typeck_results().node_type(id),
+                    };
                     Pat {
                         span,
                         kind: Box::new(PatKind::AscribeUserType {
                             subpattern: pattern,
                             ascription: Ascription {
+                                annotation,
                                 /// Note that use `Contravariant` here. See the
                                 /// `variance` field documentation for details.
                                 variance: ty::Variance::Contravariant,
-                                user_ty,
-                                user_ty_span: span,
                             },
                         }),
                         ty: const_.ty(),
@@ -547,7 +554,7 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
 
         match value {
             mir::ConstantKind::Ty(c) => {
-                match c.val() {
+                match c.kind() {
                     ConstKind::Param(_) => {
                         self.errors.push(PatternError::ConstParamInPattern(span));
                         return PatKind::Wild;
@@ -645,7 +652,7 @@ impl<'tcx, T: PatternFoldable<'tcx>> PatternFoldable<'tcx> for Option<T> {
     }
 }
 
-macro_rules! CloneImpls {
+macro_rules! ClonePatternFoldableImpls {
     (<$lt_tcx:tt> $($ty:ty),+) => {
         $(
             impl<$lt_tcx> PatternFoldable<$lt_tcx> for $ty {
@@ -657,11 +664,11 @@ macro_rules! CloneImpls {
     }
 }
 
-CloneImpls! { <'tcx>
-    Span, Field, Mutability, Symbol, hir::HirId, usize, ty::Const<'tcx>,
+ClonePatternFoldableImpls! { <'tcx>
+    Span, Field, Mutability, Symbol, LocalVarId, usize, ty::Const<'tcx>,
     Region<'tcx>, Ty<'tcx>, BindingMode, AdtDef<'tcx>,
     SubstsRef<'tcx>, &'tcx GenericArg<'tcx>, UserType<'tcx>,
-    UserTypeProjection, PatTyProj<'tcx>
+    UserTypeProjection, CanonicalUserTypeAnnotation<'tcx>
 }
 
 impl<'tcx> PatternFoldable<'tcx> for FieldPat<'tcx> {
@@ -694,14 +701,10 @@ impl<'tcx> PatternFoldable<'tcx> for PatKind<'tcx> {
             PatKind::Wild => PatKind::Wild,
             PatKind::AscribeUserType {
                 ref subpattern,
-                ascription: Ascription { variance, ref user_ty, user_ty_span },
+                ascription: Ascription { ref annotation, variance },
             } => PatKind::AscribeUserType {
                 subpattern: subpattern.fold_with(folder),
-                ascription: Ascription {
-                    user_ty: user_ty.fold_with(folder),
-                    variance,
-                    user_ty_span,
-                },
+                ascription: Ascription { annotation: annotation.fold_with(folder), variance },
             },
             PatKind::Binding { mutability, name, mode, var, ty, ref subpattern, is_primary } => {
                 PatKind::Binding {
@@ -751,56 +754,49 @@ pub(crate) fn compare_const_vals<'tcx>(
     a: mir::ConstantKind<'tcx>,
     b: mir::ConstantKind<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
-    ty: Ty<'tcx>,
 ) -> Option<Ordering> {
-    let from_bool = |v: bool| v.then_some(Ordering::Equal);
+    assert_eq!(a.ty(), b.ty());
 
-    let fallback = || from_bool(a == b);
+    let ty = a.ty();
 
-    // Use the fallback if any type differs
-    if a.ty() != b.ty() || a.ty() != ty {
-        return fallback();
+    // This code is hot when compiling matches with many ranges. So we
+    // special-case extraction of evaluated scalars for speed, for types where
+    // raw data comparisons are appropriate. E.g. `unicode-normalization` has
+    // many ranges such as '\u{037A}'..='\u{037F}', and chars can be compared
+    // in this way.
+    match ty.kind() {
+        ty::Float(_) | ty::Int(_) => {} // require special handling, see below
+        _ => match (a, b) {
+            (
+                mir::ConstantKind::Val(ConstValue::Scalar(Scalar::Int(a)), _a_ty),
+                mir::ConstantKind::Val(ConstValue::Scalar(Scalar::Int(b)), _b_ty),
+            ) => return Some(a.cmp(&b)),
+            _ => {}
+        },
     }
 
-    if a == b {
-        return from_bool(true);
-    }
+    let a = a.eval_bits(tcx, param_env, ty);
+    let b = b.eval_bits(tcx, param_env, ty);
 
-    let a_bits = a.try_eval_bits(tcx, param_env, ty);
-    let b_bits = b.try_eval_bits(tcx, param_env, ty);
-
-    if let (Some(a), Some(b)) = (a_bits, b_bits) {
-        use rustc_apfloat::Float;
-        return match *ty.kind() {
-            ty::Float(ty::FloatTy::F32) => {
-                let l = rustc_apfloat::ieee::Single::from_bits(a);
-                let r = rustc_apfloat::ieee::Single::from_bits(b);
-                l.partial_cmp(&r)
-            }
-            ty::Float(ty::FloatTy::F64) => {
-                let l = rustc_apfloat::ieee::Double::from_bits(a);
-                let r = rustc_apfloat::ieee::Double::from_bits(b);
-                l.partial_cmp(&r)
-            }
-            ty::Int(ity) => {
-                use rustc_middle::ty::layout::IntegerExt;
-                let size = rustc_target::abi::Integer::from_int_ty(&tcx, ity).size();
-                let a = size.sign_extend(a);
-                let b = size.sign_extend(b);
-                Some((a as i128).cmp(&(b as i128)))
-            }
-            _ => Some(a.cmp(&b)),
-        };
+    use rustc_apfloat::Float;
+    match *ty.kind() {
+        ty::Float(ty::FloatTy::F32) => {
+            let a = rustc_apfloat::ieee::Single::from_bits(a);
+            let b = rustc_apfloat::ieee::Single::from_bits(b);
+            a.partial_cmp(&b)
+        }
+        ty::Float(ty::FloatTy::F64) => {
+            let a = rustc_apfloat::ieee::Double::from_bits(a);
+            let b = rustc_apfloat::ieee::Double::from_bits(b);
+            a.partial_cmp(&b)
+        }
+        ty::Int(ity) => {
+            use rustc_middle::ty::layout::IntegerExt;
+            let size = rustc_target::abi::Integer::from_int_ty(&tcx, ity).size();
+            let a = size.sign_extend(a);
+            let b = size.sign_extend(b);
+            Some((a as i128).cmp(&(b as i128)))
+        }
+        _ => Some(a.cmp(&b)),
     }
-
-    if let ty::Str = ty.kind() && let (
-        Some(a_val @ ConstValue::Slice { .. }),
-        Some(b_val @ ConstValue::Slice { .. }),
-    ) = (a.try_val(), b.try_val())
-    {
-        let a_bytes = get_slice_bytes(&tcx, a_val);
-        let b_bytes = get_slice_bytes(&tcx, b_val);
-        return from_bool(a_bytes == b_bytes);
-    }
-    fallback()
 }

@@ -1,7 +1,6 @@
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_hir::def_id::CrateNum;
 use rustc_hir::definitions::{DefPathData, DisambiguatedDefPathData};
-use rustc_middle::mir::interpret::{ConstValue, Scalar};
 use rustc_middle::ty::print::{PrettyPrinter, Print, Printer};
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable};
@@ -30,6 +29,7 @@ pub(super) fn mangle<'tcx>(
         match key.disambiguated_data.data {
             DefPathData::TypeNs(_) | DefPathData::ValueNs(_) => {
                 instance_ty = tcx.type_of(ty_def_id);
+                debug!(?instance_ty);
                 break;
             }
             _ => {
@@ -228,9 +228,9 @@ impl<'tcx> Printer<'tcx> for &mut SymbolPrinter<'tcx> {
                 self.write_str("[")?;
                 self = self.print_type(ty)?;
                 self.write_str("; ")?;
-                if let Some(size) = size.val().try_to_bits(self.tcx().data_layout.pointer_size) {
+                if let Some(size) = size.kind().try_to_bits(self.tcx().data_layout.pointer_size) {
                     write!(self, "{}", size)?
-                } else if let ty::ConstKind::Param(param) = size.val() {
+                } else if let ty::ConstKind::Param(param) = size.kind() {
                     self = param.print(self)?
                 } else {
                     self.write_str("_")?
@@ -260,11 +260,8 @@ impl<'tcx> Printer<'tcx> for &mut SymbolPrinter<'tcx> {
 
     fn print_const(self, ct: ty::Const<'tcx>) -> Result<Self::Const, Self::Error> {
         // only print integers
-        match (ct.val(), ct.ty().kind()) {
-            (
-                ty::ConstKind::Value(ConstValue::Scalar(Scalar::Int(scalar))),
-                ty::Int(_) | ty::Uint(_),
-            ) => {
+        match (ct.kind(), ct.ty().kind()) {
+            (ty::ConstKind::Value(ty::ValTree::Leaf(scalar)), ty::Int(_) | ty::Uint(_)) => {
                 // The `pretty_print_const` formatting depends on -Zverbose
                 // flag, so we cannot reuse it here.
                 let signed = matches!(ct.ty().kind(), ty::Int(_));

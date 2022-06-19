@@ -70,7 +70,7 @@ macro_rules! need {
 }
 
 impl<'tcx> LateLintPass<'tcx> for NeedlessPassByValue {
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn check_fn(
         &mut self,
         cx: &LateContext<'tcx>,
@@ -258,7 +258,7 @@ impl<'tcx> LateLintPass<'tcx> for NeedlessPassByValue {
                                 diag.span_suggestion(
                                     input.span,
                                     "consider changing the type to",
-                                    "&str".to_string(),
+                                    "&str",
                                     Applicability::Unspecified,
                                 );
 

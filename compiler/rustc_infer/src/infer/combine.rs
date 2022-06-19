@@ -1,26 +1,26 @@
-///////////////////////////////////////////////////////////////////////////
-// # Type combining
-//
-// There are four type combiners: equate, sub, lub, and glb.  Each
-// implements the trait `Combine` and contains methods for combining
-// two instances of various things and yielding a new instance.  These
-// combiner methods always yield a `Result<T>`.  There is a lot of
-// common code for these operations, implemented as default methods on
-// the `Combine` trait.
-//
-// Each operation may have side-effects on the inference context,
-// though these can be unrolled using snapshots. On success, the
-// LUB/GLB operations return the appropriate bound. The Eq and Sub
-// operations generally return the first operand.
-//
-// ## Contravariance
-//
-// When you are relating two things which have a contravariant
-// relationship, you should use `contratys()` or `contraregions()`,
-// rather than inversing the order of arguments!  This is necessary
-// because the order of arguments is not relevant for LUB and GLB.  It
-// is also useful to track which value is the "expected" value in
-// terms of error reporting.
+//! There are four type combiners: [Equate], [Sub], [Lub], and [Glb].
+//! Each implements the trait [TypeRelation] and contains methods for
+//! combining two instances of various things and yielding a new instance.
+//! These combiner methods always yield a `Result<T>`. To relate two
+//! types, you can use `infcx.at(cause, param_env)` which then allows
+//! you to use the relevant methods of [At](super::at::At).
+//!
+//! Combiners mostly do their specific behavior and then hand off the
+//! bulk of the work to [InferCtxt::super_combine_tys] and
+//! [InferCtxt::super_combine_consts].
+//!
+//! Combining two types may have side-effects on the inference contexts
+//! which can be undone by using snapshots. You probably want to use
+//! either [InferCtxt::commit_if_ok] or [InferCtxt::probe].
+//!
+//! On success, the  LUB/GLB operations return the appropriate bound. The
+//! return value of `Equate` or `Sub` shouldn't really be used.
+//!
+//! ## Contravariance
+//!
+//! We explicitly track which argument is expected using
+//! [TypeRelation::a_is_expected], so when dealing with contravariance
+//! this should be correctly updated.
 
 use super::equate::Equate;
 use super::glb::Glb;
@@ -142,7 +142,7 @@ impl<'infcx, 'tcx> InferCtxt<'infcx, 'tcx> {
 
         let a_is_expected = relation.a_is_expected();
 
-        match (a.val(), b.val()) {
+        match (a.kind(), b.kind()) {
             (
                 ty::ConstKind::Infer(InferConst::Var(a_vid)),
                 ty::ConstKind::Infer(InferConst::Var(b_vid)),
@@ -726,7 +726,7 @@ impl<'tcx> TypeRelation<'tcx> for Generalizer<'_, 'tcx> {
     ) -> RelateResult<'tcx, ty::Const<'tcx>> {
         assert_eq!(c, c2); // we are abusing TypeRelation here; both LHS and RHS ought to be ==
 
-        match c.val() {
+        match c.kind() {
             ty::ConstKind::Infer(InferConst::Var(vid)) => {
                 let mut inner = self.infcx.inner.borrow_mut();
                 let variable_table = &mut inner.const_unification_table();
@@ -761,7 +761,7 @@ impl<'tcx> TypeRelation<'tcx> for Generalizer<'_, 'tcx> {
                 )?;
                 Ok(self.tcx().mk_const(ty::ConstS {
                     ty: c.ty(),
-                    val: ty::ConstKind::Unevaluated(ty::Unevaluated { def, substs, promoted }),
+                    kind: ty::ConstKind::Unevaluated(ty::Unevaluated { def, substs, promoted }),
                 }))
             }
             _ => relate::super_relate_consts(self, c, c),
@@ -941,7 +941,7 @@ impl<'tcx> TypeRelation<'tcx> for ConstInferUnifier<'_, 'tcx> {
         debug_assert_eq!(c, _c);
         debug!("ConstInferUnifier: c={:?}", c);
 
-        match c.val() {
+        match c.kind() {
             ty::ConstKind::Infer(InferConst::Var(vid)) => {
                 // Check if the current unification would end up
                 // unifying `target_vid` with a const which contains
@@ -992,7 +992,7 @@ impl<'tcx> TypeRelation<'tcx> for ConstInferUnifier<'_, 'tcx> {
                 )?;
                 Ok(self.tcx().mk_const(ty::ConstS {
                     ty: c.ty(),
-                    val: ty::ConstKind::Unevaluated(ty::Unevaluated { def, substs, promoted }),
+                    kind: ty::ConstKind::Unevaluated(ty::Unevaluated { def, substs, promoted }),
                 }))
             }
             _ => relate::super_relate_consts(self, c, c),

@@ -1,8 +1,8 @@
 //! Support for serializing the dep-graph and reloading it.
 
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![feature(nll)]
 #![feature(min_specialization)]
+#![feature(never_type)]
 #![feature(once_cell)]
 #![feature(rustc_attrs)]
 #![recursion_limit = "256"]

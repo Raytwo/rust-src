@@ -141,7 +141,10 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     })
                     .collect::<Vec<_>>()
             })
-            .chain([Cfg::Cfg(sym::test, None)].into_iter())
+            .chain(
+                [Cfg::Cfg(sym::test, None), Cfg::Cfg(sym::doc, None), Cfg::Cfg(sym::doctest, None)]
+                    .into_iter(),
+            )
             .collect();
 
         self.cx.cache.exact_paths = self.exact_paths;
@@ -286,8 +289,8 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     self.visit_foreign_item(item, None, om);
                 }
             }
-            // If we're inlining, skip private items.
-            _ if self.inlining && !is_pub => {}
+            // If we're inlining, skip private items or item reexported as "_".
+            _ if self.inlining && (!is_pub || renamed == Some(kw::Underscore)) => {}
             hir::ItemKind::GlobalAsm(..) => {}
             hir::ItemKind::Use(_, hir::UseKind::ListStem) => {}
             hir::ItemKind::Use(path, kind) => {
@@ -365,7 +368,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     om.items.push((item, renamed));
                 }
             }
-            hir::ItemKind::Impl(ref impl_) => {
+            hir::ItemKind::Impl(impl_) => {
                 // Don't duplicate impls when inlining or if it's implementing a trait, we'll pick
                 // them up regardless of where they're located.
                 if !self.inlining && impl_.of_trait.is_none() {

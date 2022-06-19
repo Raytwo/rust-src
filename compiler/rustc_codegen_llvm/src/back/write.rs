@@ -56,28 +56,24 @@ pub fn write_output_file<'ll>(
     file_type: llvm::FileType,
     self_profiler_ref: &SelfProfilerRef,
 ) -> Result<(), FatalError> {
+    debug!("write_output_file output={:?} dwo_output={:?}", output, dwo_output);
     unsafe {
         let output_c = path_to_c_string(output);
-        let result = if let Some(dwo_output) = dwo_output {
-            let dwo_output_c = path_to_c_string(dwo_output);
-            llvm::LLVMRustWriteOutputFile(
-                target,
-                pm,
-                m,
-                output_c.as_ptr(),
-                dwo_output_c.as_ptr(),
-                file_type,
-            )
+        let dwo_output_c;
+        let dwo_output_ptr = if let Some(dwo_output) = dwo_output {
+            dwo_output_c = path_to_c_string(dwo_output);
+            dwo_output_c.as_ptr()
         } else {
-            llvm::LLVMRustWriteOutputFile(
-                target,
-                pm,
-                m,
-                output_c.as_ptr(),
-                std::ptr::null(),
-                file_type,
-            )
+            std::ptr::null()
         };
+        let result = llvm::LLVMRustWriteOutputFile(
+            target,
+            pm,
+            m,
+            output_c.as_ptr(),
+            dwo_output_ptr,
+            file_type,
+        );
 
         // Record artifact sizes for self-profiling
         if result == llvm::LLVMRustResult::Success {
@@ -340,7 +336,7 @@ fn report_inline_asm(
     }
     let level = match level {
         llvm::DiagnosticLevel::Error => Level::Error { lint: false },
-        llvm::DiagnosticLevel::Warning => Level::Warning,
+        llvm::DiagnosticLevel::Warning => Level::Warning(None),
         llvm::DiagnosticLevel::Note | llvm::DiagnosticLevel::Remark => Level::Note,
     };
     cgcx.diag_emitter.inline_asm_error(cookie as u32, msg, level, source);
@@ -467,7 +463,7 @@ pub(crate) unsafe fn optimize_with_new_llvm_pass_manager(
     let llvm_selfprofiler =
         llvm_profiler.as_mut().map(|s| s as *mut _ as *mut c_void).unwrap_or(std::ptr::null_mut());
 
-    let extra_passes = config.passes.join(",");
+    let extra_passes = if !is_lto { config.passes.join(",") } else { "".to_string() };
 
     let llvm_plugins = config.llvm_plugins.join(",");
 
@@ -1040,7 +1036,8 @@ unsafe fn embed_bitcode(
     // reason (see issue #90326 for historical background).
     let is_apple = cgcx.opts.target_triple.triple().contains("-ios")
         || cgcx.opts.target_triple.triple().contains("-darwin")
-        || cgcx.opts.target_triple.triple().contains("-tvos");
+        || cgcx.opts.target_triple.triple().contains("-tvos")
+        || cgcx.opts.target_triple.triple().contains("-watchos");
     if is_apple
         || cgcx.opts.target_triple.triple().starts_with("wasm")
         || cgcx.opts.target_triple.triple().starts_with("asmjs")

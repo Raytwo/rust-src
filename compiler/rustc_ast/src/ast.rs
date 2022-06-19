@@ -23,15 +23,15 @@ pub use GenericArgs::*;
 pub use UnsafeSource::*;
 
 use crate::ptr::P;
-use crate::token::{self, CommentKind, Delimiter, Token, TokenKind};
-use crate::tokenstream::{DelimSpan, LazyTokenStream, TokenStream, TokenTree};
+use crate::token::{self, CommentKind, Delimiter};
+use crate::tokenstream::{DelimSpan, LazyTokenStream, TokenStream};
 
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_data_structures::sync::Lrc;
 use rustc_data_structures::thin_vec::ThinVec;
 use rustc_macros::HashStable_Generic;
-use rustc_serialize::{self, Decoder, Encoder};
+use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_span::source_map::{respan, Spanned};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::{Span, DUMMY_SP};
@@ -40,9 +40,6 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
 use std::mem;
-
-#[cfg(test)]
-mod tests;
 
 /// A "Label" is an identifier of some point in sources,
 /// e.g. in the following code:
@@ -444,8 +441,7 @@ impl Default for Generics {
 pub struct WhereClause {
     /// `true` if we ate a `where` token: this can happen
     /// if we parsed no predicates (e.g. `struct Foo where {}`).
-    /// This allows us to accurately pretty-print
-    /// in `nt_to_tokenstream`
+    /// This allows us to pretty-print accurately.
     pub has_where_token: bool,
     pub predicates: Vec<WherePredicate>,
     pub span: Span,
@@ -1282,6 +1278,22 @@ impl Expr {
             },
         )
     }
+
+    // To a first-order approximation, is this a pattern
+    pub fn is_approximately_pattern(&self) -> bool {
+        match &self.peel_parens().kind {
+            ExprKind::Box(_)
+            | ExprKind::Array(_)
+            | ExprKind::Call(_, _)
+            | ExprKind::Tup(_)
+            | ExprKind::Lit(_)
+            | ExprKind::Range(_, _, _)
+            | ExprKind::Underscore
+            | ExprKind::Path(_, _)
+            | ExprKind::Struct(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Limit types of a range (inclusive or exclusive)
@@ -1571,20 +1583,7 @@ impl MacArgs {
         match self {
             MacArgs::Empty => TokenStream::default(),
             MacArgs::Delimited(.., tokens) => tokens.clone(),
-            MacArgs::Eq(_, MacArgsEq::Ast(expr)) => {
-                // Currently only literals are allowed here. If more complex expression kinds are
-                // allowed in the future, then `nt_to_tokenstream` should be used to extract the
-                // token stream. This will require some cleverness, perhaps with a function
-                // pointer, because `nt_to_tokenstream` is not directly usable from this crate.
-                // It will also require changing the `parse_expr` call in `parse_mac_args_common`
-                // to `parse_expr_force_collect`.
-                if let ExprKind::Lit(lit) = &expr.kind {
-                    let token = Token::new(TokenKind::Literal(lit.token), lit.span);
-                    TokenTree::Token(token).into()
-                } else {
-                    unreachable!("couldn't extract literal when getting inner tokens: {:?}", expr)
-                }
-            }
+            MacArgs::Eq(_, MacArgsEq::Ast(expr)) => TokenStream::from_ast(expr),
             MacArgs::Eq(_, MacArgsEq::Hir(lit)) => {
                 unreachable!("in literal form when getting inner tokens: {:?}", lit)
             }
@@ -2489,13 +2488,11 @@ rustc_index::newtype_index! {
     }
 }
 
-impl<S: Encoder> rustc_serialize::Encodable<S> for AttrId {
-    fn encode(&self, s: &mut S) -> Result<(), S::Error> {
-        s.emit_unit()
-    }
+impl<S: Encoder> Encodable<S> for AttrId {
+    fn encode(&self, _s: &mut S) {}
 }
 
-impl<D: Decoder> rustc_serialize::Decodable<D> for AttrId {
+impl<D: Decoder> Decodable<D> for AttrId {
     fn decode(_: &mut D) -> AttrId {
         crate::attr::mk_attr_id()
     }
@@ -2566,15 +2563,6 @@ impl PolyTraitRef {
     }
 }
 
-#[derive(Copy, Clone, Encodable, Decodable, Debug, HashStable_Generic)]
-pub enum CrateSugar {
-    /// Source is `pub(crate)`.
-    PubCrate,
-
-    /// Source is (just) `crate`.
-    JustCrate,
-}
-
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub struct Visibility {
     pub kind: VisibilityKind,
@@ -2585,7 +2573,6 @@ pub struct Visibility {
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub enum VisibilityKind {
     Public,
-    Crate(CrateSugar),
     Restricted { path: P<Path>, id: NodeId },
     Inherited,
 }

@@ -21,7 +21,7 @@ mod num;
 #[stable(feature = "fmt_flags_align", since = "1.28.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "Alignment")]
 /// Possible alignments returned by `Formatter::align`
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Alignment {
     #[stable(feature = "fmt_flags_align", since = "1.28.0")]
     /// Indication that contents should be left-aligned.
@@ -2233,35 +2233,41 @@ impl Display for char {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized> Pointer for *const T {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        /// Since the formatting will be identical for all pointer types, use a non-monomorphized
-        /// implementation for the actual formatting to reduce the amount of codegen work needed
-        fn inner(ptr: *const (), f: &mut Formatter<'_>) -> Result {
-            let old_width = f.width;
-            let old_flags = f.flags;
-
-            // The alternate flag is already treated by LowerHex as being special-
-            // it denotes whether to prefix with 0x. We use it to work out whether
-            // or not to zero extend, and then unconditionally set it to get the
-            // prefix.
-            if f.alternate() {
-                f.flags |= 1 << (FlagV1::SignAwareZeroPad as u32);
-
-                if f.width.is_none() {
-                    f.width = Some((usize::BITS / 4) as usize + 2);
-                }
-            }
-            f.flags |= 1 << (FlagV1::Alternate as u32);
-
-            let ret = LowerHex::fmt(&(ptr.addr()), f);
-
-            f.width = old_width;
-            f.flags = old_flags;
-
-            ret
-        }
-
-        inner(*self as *const (), f)
+        // Cast is needed here because `.addr()` requires `T: Sized`.
+        pointer_fmt_inner((*self as *const ()).addr(), f)
     }
+}
+
+/// Since the formatting will be identical for all pointer types, use a non-monomorphized
+/// implementation for the actual formatting to reduce the amount of codegen work needed.
+///
+/// This uses `ptr_addr: usize` and not `ptr: *const ()` to be able to use this for
+/// `fn(...) -> ...` without using [problematic] "Oxford Casts".
+///
+/// [problematic]: https://github.com/rust-lang/rust/issues/95489
+pub(crate) fn pointer_fmt_inner(ptr_addr: usize, f: &mut Formatter<'_>) -> Result {
+    let old_width = f.width;
+    let old_flags = f.flags;
+
+    // The alternate flag is already treated by LowerHex as being special-
+    // it denotes whether to prefix with 0x. We use it to work out whether
+    // or not to zero extend, and then unconditionally set it to get the
+    // prefix.
+    if f.alternate() {
+        f.flags |= 1 << (FlagV1::SignAwareZeroPad as u32);
+
+        if f.width.is_none() {
+            f.width = Some((usize::BITS / 4) as usize + 2);
+        }
+    }
+    f.flags |= 1 << (FlagV1::Alternate as u32);
+
+    let ret = LowerHex::fmt(&ptr_addr, f);
+
+    f.width = old_width;
+    f.flags = old_flags;
+
+    ret
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -2307,21 +2313,38 @@ macro_rules! peel {
 macro_rules! tuple {
     () => ();
     ( $($name:ident,)+ ) => (
-        #[stable(feature = "rust1", since = "1.0.0")]
-        impl<$($name:Debug),+> Debug for ($($name,)+) where last_type!($($name,)+): ?Sized {
-            #[allow(non_snake_case, unused_assignments)]
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-                let mut builder = f.debug_tuple("");
-                let ($(ref $name,)+) = *self;
-                $(
-                    builder.field(&$name);
-                )+
+        maybe_tuple_doc! {
+            $($name)+ @
+            #[stable(feature = "rust1", since = "1.0.0")]
+            impl<$($name:Debug),+> Debug for ($($name,)+) where last_type!($($name,)+): ?Sized {
+                #[allow(non_snake_case, unused_assignments)]
+                fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                    let mut builder = f.debug_tuple("");
+                    let ($(ref $name,)+) = *self;
+                    $(
+                        builder.field(&$name);
+                    )+
 
-                builder.finish()
+                    builder.finish()
+                }
             }
         }
         peel! { $($name,)+ }
     )
+}
+
+macro_rules! maybe_tuple_doc {
+    ($a:ident @ #[$meta:meta] $item:item) => {
+        #[cfg_attr(not(bootstrap), doc(tuple_variadic))]
+        #[doc = "This trait is implemented for tuples up to twelve items long."]
+        #[$meta]
+        $item
+    };
+    ($a:ident $($rest_a:ident)+ @ #[$meta:meta] $item:item) => {
+        #[doc(hidden)]
+        #[$meta]
+        $item
+    };
 }
 
 macro_rules! last_type {
@@ -2329,7 +2352,7 @@ macro_rules! last_type {
     ($a:ident, $($rest_a:ident,)+) => { last_type!($($rest_a,)+) };
 }
 
-tuple! { T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, }
+tuple! { E, D, C, B, A, Z, Y, X, W, V, U, T, }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Debug> Debug for [T] {

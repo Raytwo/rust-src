@@ -102,7 +102,7 @@ fn emit_frag_parse_err(
                 e.span_suggestion_verbose(
                     site_span.shrink_to_hi(),
                     "add `;` to interpret the expansion as a statement",
-                    ";".to_string(),
+                    ";",
                     Applicability::MaybeIncorrect,
                 );
             }
@@ -123,7 +123,7 @@ impl<'a> ParserAnyMacro<'a> {
             is_trailing_mac,
             is_local,
         } = *self;
-        let snapshot = &mut parser.clone();
+        let snapshot = &mut parser.create_snapshot_for_diagnostic();
         let fragment = match parse_ast_fragment(parser, kind) {
             Ok(f) => f,
             Err(err) => {
@@ -204,7 +204,7 @@ fn trace_macros_note(cx_expansions: &mut FxHashMap<Span, Vec<String>>, sp: Span,
 
 /// Expands the rules based macro defined by `lhses` and `rhses` for a given
 /// input `arg`.
-fn expand_macro<'cx, 'tt>(
+fn expand_macro<'cx>(
     cx: &'cx mut ExtCtxt<'_>,
     sp: Span,
     def_span: Span,
@@ -212,8 +212,8 @@ fn expand_macro<'cx, 'tt>(
     name: Ident,
     transparency: Transparency,
     arg: TokenStream,
-    lhses: &'tt [Vec<MatcherLoc>],
-    rhses: &'tt [mbe::TokenTree],
+    lhses: &[Vec<MatcherLoc>],
+    rhses: &[mbe::TokenTree],
 ) -> Box<dyn MacResult + 'cx> {
     let sess = &cx.sess.parse_sess;
     // Macros defined in the current crate have a real node id,
@@ -357,7 +357,7 @@ fn expand_macro<'cx, 'tt>(
                     err.span_suggestion_short(
                         comma_span,
                         "missing comma here",
-                        ", ".to_string(),
+                        ", ",
                         Applicability::MachineApplicable,
                     );
                 }
@@ -380,7 +380,7 @@ pub fn compile_declarative_macro(
     features: &Features,
     def: &ast::Item,
     edition: Edition,
-) -> (SyntaxExtension, Vec<Span>) {
+) -> (SyntaxExtension, Vec<(usize, Span)>) {
     debug!("compile_declarative_macro: {:?}", def);
     let mk_syn_ext = |expander| {
         SyntaxExtension::new(
@@ -539,11 +539,22 @@ pub fn compile_declarative_macro(
         None => {}
     }
 
-    // Compute the spans of the macro rules
-    // We only take the span of the lhs here,
-    // so that the spans of created warnings are smaller.
-    let rule_spans = if def.id != DUMMY_NODE_ID {
-        lhses.iter().map(|lhs| lhs.span()).collect::<Vec<_>>()
+    // Compute the spans of the macro rules for unused rule linting.
+    // To avoid warning noise, only consider the rules of this
+    // macro for the lint, if all rules are valid.
+    // Also, we are only interested in non-foreign macros.
+    let rule_spans = if valid && def.id != DUMMY_NODE_ID {
+        lhses
+            .iter()
+            .zip(rhses.iter())
+            .enumerate()
+            // If the rhs contains an invocation like compile_error!,
+            // don't consider the rule for the unused rule lint.
+            .filter(|(_idx, (_lhs, rhs))| !has_compile_error_macro(rhs))
+            // We only take the span of the lhs here,
+            // so that the spans of created warnings are smaller.
+            .map(|(idx, (lhs, _rhs))| (idx, lhs.span()))
+            .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
@@ -649,6 +660,29 @@ fn check_matcher(sess: &ParseSess, def: &ast::Item, matcher: &[mbe::TokenTree]) 
     let err = sess.span_diagnostic.err_count();
     check_matcher_core(sess, def, &first_sets, matcher, &empty_suffix);
     err == sess.span_diagnostic.err_count()
+}
+
+fn has_compile_error_macro(rhs: &mbe::TokenTree) -> bool {
+    match rhs {
+        mbe::TokenTree::Delimited(_sp, d) => {
+            let has_compile_error = d.tts.array_windows::<3>().any(|[ident, bang, args]| {
+                if let mbe::TokenTree::Token(ident) = ident &&
+                        let TokenKind::Ident(ident, _) = ident.kind &&
+                        ident == sym::compile_error &&
+                        let mbe::TokenTree::Token(bang) = bang &&
+                        let TokenKind::Not = bang.kind &&
+                        let mbe::TokenTree::Delimited(_, del) = args &&
+                        del.delim != Delimiter::Invisible
+                    {
+                        true
+                    } else {
+                        false
+                    }
+            });
+            if has_compile_error { true } else { d.tts.iter().any(has_compile_error_macro) }
+        }
+        _ => false,
+    }
 }
 
 // `The FirstSets` for a matcher is a mapping from subsequences in the

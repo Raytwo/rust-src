@@ -103,10 +103,10 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                 })
             }),
             hir::Node::Expr(hir::Expr {
-                kind: hir::ExprKind::Closure(_is_move, _, body_id, _, gen_movability),
+                kind: hir::ExprKind::Closure { body, movability, .. },
                 ..
-            }) => self.describe_generator(*body_id).or_else(|| {
-                Some(if gen_movability.is_some() { "an async closure" } else { "a closure" })
+            }) => self.describe_generator(*body).or_else(|| {
+                Some(if movability.is_some() { "an async closure" } else { "a closure" })
             }),
             hir::Node::Expr(hir::Expr { .. }) => {
                 let parent_hid = hir.get_parent_node(hir_id);
@@ -234,7 +234,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             // Arrays give us `[]`, `[{ty}; _]` and `[{ty}; N]`
             if let ty::Array(aty, len) = self_ty.kind() {
                 flags.push((sym::_Self, Some("[]".to_string())));
-                let len = len.val().try_to_value().and_then(|v| v.try_to_machine_usize(self.tcx));
+                let len = len.kind().try_to_value().and_then(|v| v.try_to_machine_usize(self.tcx));
                 flags.push((sym::_Self, Some(format!("[{}; _]", aty))));
                 if let Some(n) = len {
                     flags.push((sym::_Self, Some(format!("[{}; {}]", aty, n))));

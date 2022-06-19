@@ -192,7 +192,8 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for ConstPropMachine<'mir, 'tcx>
         _instance: ty::Instance<'tcx>,
         _abi: Abi,
         _args: &[OpTy<'tcx>],
-        _ret: Option<(&PlaceTy<'tcx>, BasicBlock)>,
+        _destination: &PlaceTy<'tcx>,
+        _target: Option<BasicBlock>,
         _unwind: StackPopUnwind,
     ) -> InterpResult<'tcx, Option<(&'mir Body<'tcx>, ty::Instance<'tcx>)>> {
         Ok(None)
@@ -202,7 +203,8 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for ConstPropMachine<'mir, 'tcx>
         _ecx: &mut InterpCx<'mir, 'tcx, Self>,
         _instance: ty::Instance<'tcx>,
         _args: &[OpTy<'tcx>],
-        _ret: Option<(&PlaceTy<'tcx>, BasicBlock)>,
+        _destination: &PlaceTy<'tcx>,
+        _target: Option<BasicBlock>,
         _unwind: StackPopUnwind,
     ) -> InterpResult<'tcx> {
         throw_machine_stop_str!("calling intrinsics isn't supported in ConstProp")
@@ -377,24 +379,22 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             ConstPropMachine::new(only_propagate_inside_block_locals, can_const_prop),
         );
 
-        let ret = ecx
+        let ret_layout = ecx
             .layout_of(EarlyBinder(body.return_ty()).subst(tcx, substs))
             .ok()
-            // Don't bother allocating memory for ZST types which have no values
-            // or for large values.
-            .filter(|ret_layout| {
-                !ret_layout.is_zst() && ret_layout.size < Size::from_bytes(MAX_ALLOC_LIMIT)
-            })
-            .map(|ret_layout| {
-                ecx.allocate(ret_layout, MemoryKind::Stack)
-                    .expect("couldn't perform small allocation")
-                    .into()
-            });
+            // Don't bother allocating memory for large values.
+            .filter(|ret_layout| ret_layout.size < Size::from_bytes(MAX_ALLOC_LIMIT))
+            .unwrap_or_else(|| ecx.layout_of(tcx.types.unit).unwrap());
+
+        let ret = ecx
+            .allocate(ret_layout, MemoryKind::Stack)
+            .expect("couldn't perform small allocation")
+            .into();
 
         ecx.push_stack_frame(
             Instance::new(def_id, substs),
             dummy_body,
-            ret.as_ref(),
+            &ret,
             StackPopCleanup::Root { cleanup: false },
         )
         .expect("failed to push initial stack frame");
@@ -437,10 +437,12 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         source_info.scope.lint_root(self.source_scopes)
     }
 
-    fn use_ecx<F, T>(&mut self, f: F) -> Option<T>
+    fn use_ecx<F, T>(&mut self, source_info: SourceInfo, f: F) -> Option<T>
     where
         F: FnOnce(&mut Self) -> InterpResult<'tcx, T>,
     {
+        // Overwrite the PC -- whatever the interpreter does to it does not make any sense anyway.
+        self.ecx.frame_mut().loc = Err(source_info.span);
         match f(self) {
             Ok(val) => Some(val),
             Err(error) => {
@@ -472,7 +474,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                 let err = ConstEvalErr::new(&self.ecx, error, Some(c.span));
                 if let Some(lint_root) = self.lint_root(source_info) {
                     let lint_only = match c.literal {
-                        ConstantKind::Ty(ct) => match ct.val() {
+                        ConstantKind::Ty(ct) => match ct.kind() {
                             // Promoteds must lint and not error as the user didn't ask for them
                             ConstKind::Unevaluated(ty::Unevaluated {
                                 def: _,
@@ -501,9 +503,9 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     }
 
     /// Returns the value, if any, of evaluating `place`.
-    fn eval_place(&mut self, place: Place<'tcx>) -> Option<OpTy<'tcx>> {
+    fn eval_place(&mut self, place: Place<'tcx>, source_info: SourceInfo) -> Option<OpTy<'tcx>> {
         trace!("eval_place(place={:?})", place);
-        self.use_ecx(|this| this.ecx.eval_place_to_op(place, None))
+        self.use_ecx(source_info, |this| this.ecx.eval_place_to_op(place, None))
     }
 
     /// Returns the value, if any, of evaluating `op`. Calls upon `eval_constant`
@@ -511,7 +513,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     fn eval_operand(&mut self, op: &Operand<'tcx>, source_info: SourceInfo) -> Option<OpTy<'tcx>> {
         match *op {
             Operand::Constant(ref c) => self.eval_constant(c, source_info),
-            Operand::Move(place) | Operand::Copy(place) => self.eval_place(place),
+            Operand::Move(place) | Operand::Copy(place) => self.eval_place(place, source_info),
         }
     }
 
@@ -537,7 +539,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         arg: &Operand<'tcx>,
         source_info: SourceInfo,
     ) -> Option<()> {
-        if let (val, true) = self.use_ecx(|this| {
+        if let (val, true) = self.use_ecx(source_info, |this| {
             let val = this.ecx.read_immediate(&this.ecx.eval_operand(arg, None)?)?;
             let (_res, overflow, _ty) = this.ecx.overflowing_unary_op(op, &val)?;
             Ok((val, overflow))
@@ -564,8 +566,12 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         right: &Operand<'tcx>,
         source_info: SourceInfo,
     ) -> Option<()> {
-        let r = self.use_ecx(|this| this.ecx.read_immediate(&this.ecx.eval_operand(right, None)?));
-        let l = self.use_ecx(|this| this.ecx.read_immediate(&this.ecx.eval_operand(left, None)?));
+        let r = self.use_ecx(source_info, |this| {
+            this.ecx.read_immediate(&this.ecx.eval_operand(right, None)?)
+        });
+        let l = self.use_ecx(source_info, |this| {
+            this.ecx.read_immediate(&this.ecx.eval_operand(left, None)?)
+        });
         // Check for exceeding shifts *even if* we cannot evaluate the LHS.
         if op == BinOp::Shr || op == BinOp::Shl {
             let r = r?;
@@ -602,7 +608,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
 
         if let (Some(l), Some(r)) = (&l, &r) {
             // The remaining operators are handled through `overflowing_binary_op`.
-            if self.use_ecx(|this| {
+            if self.use_ecx(source_info, |this| {
                 let (_res, overflow, _ty) = this.ecx.overflowing_binary_op(op, l, r)?;
                 Ok(overflow)
             })? {
@@ -690,7 +696,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             return None;
         }
 
-        self.use_ecx(|this| this.ecx.eval_rvalue_into_place(rvalue, place))
+        self.use_ecx(source_info, |this| this.ecx.eval_rvalue_into_place(rvalue, place))
     }
 }
 
@@ -890,7 +896,10 @@ impl<'tcx> Visitor<'tcx> for ConstPropagator<'_, 'tcx> {
                 StatementKind::SetDiscriminant { ref place, .. } => {
                     match self.ecx.machine.can_const_prop[place.local] {
                         ConstPropMode::FullConstProp | ConstPropMode::OnlyInsideOwnBlock => {
-                            if self.use_ecx(|this| this.ecx.statement(statement)).is_some() {
+                            if self
+                                .use_ecx(source_info, |this| this.ecx.statement(statement))
+                                .is_some()
+                            {
                                 trace!("propped discriminant into {:?}", place);
                             } else {
                                 Self::remove_const(&mut self.ecx, place.local);

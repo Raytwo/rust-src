@@ -1,6 +1,7 @@
 fn transmute_lifetime<'a, 'b, T>(t: &'a (T,)) -> &'b T {
-    match (&t,) { //~ ERROR cannot infer an appropriate lifetime
+    match (&t,) {
         ((u,),) => u,
+        //~^ ERROR lifetime may not live long enough
     }
 }
 

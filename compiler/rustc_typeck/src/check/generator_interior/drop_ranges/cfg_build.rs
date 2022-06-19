@@ -188,7 +188,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
             | ExprKind::If(..)
             | ExprKind::Loop(..)
             | ExprKind::Match(..)
-            | ExprKind::Closure(..)
+            | ExprKind::Closure { .. }
             | ExprKind::Block(..)
             | ExprKind::Assign(..)
             | ExprKind::AssignOp(..)
@@ -249,6 +249,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
                 | hir::Node::Stmt(..)
                 | hir::Node::PathSegment(..)
                 | hir::Node::Ty(..)
+                | hir::Node::TypeBinding(..)
                 | hir::Node::TraitRef(..)
                 | hir::Node::Binding(..)
                 | hir::Node::Pat(..)
@@ -443,7 +444,7 @@ impl<'a, 'tcx> Visitor<'tcx> for DropRangeVisitor<'a, 'tcx> {
             | ExprKind::Block(..)
             | ExprKind::Box(..)
             | ExprKind::Cast(..)
-            | ExprKind::Closure(..)
+            | ExprKind::Closure { .. }
             | ExprKind::ConstBlock(..)
             | ExprKind::DropTemps(..)
             | ExprKind::Err

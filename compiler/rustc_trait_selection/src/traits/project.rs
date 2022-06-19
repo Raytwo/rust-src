@@ -29,7 +29,7 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::lang_items::LangItem;
 use rustc_infer::infer::resolve::OpportunisticRegionResolver;
 use rustc_middle::traits::select::OverflowError;
-use rustc_middle::ty::fold::{MaxUniverse, TypeFoldable, TypeFolder};
+use rustc_middle::ty::fold::{MaxUniverse, TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{self, EarlyBinder, Term, ToPredicate, Ty, TyCtxt};
 use rustc_span::symbol::sym;
@@ -145,15 +145,28 @@ impl<'tcx> ProjectionCandidateSet<'tcx> {
     }
 }
 
-/// Takes the place of a
+/// States returned from `poly_project_and_unify_type`. Takes the place
+/// of the old return type, which was:
+/// ```ignore (not-rust)
 /// Result<
 ///     Result<Option<Vec<PredicateObligation<'tcx>>>, InProgress>,
 ///     MismatchedProjectionTypes<'tcx>,
 /// >
+/// ```
 pub(super) enum ProjectAndUnifyResult<'tcx> {
+    /// The projection bound holds subject to the given obligations. If the
+    /// projection cannot be normalized because the required trait bound does
+    /// not hold, this is returned, with `obligations` being a predicate that
+    /// cannot be proven.
     Holds(Vec<PredicateObligation<'tcx>>),
+    /// The projection cannot be normalized due to ambiguity. Resolving some
+    /// inference variables in the projection may fix this.
     FailedNormalization,
+    /// The project cannot be normalized because `poly_project_and_unify_type`
+    /// is called recursively while normalizing the same projection.
     Recursive,
+    // the projection can be normalized, but is not equal to the expected type.
+    // Returns the type error that arose from the mismatch.
     MismatchedProjectionTypes(MismatchedProjectionTypes<'tcx>),
 }
 
@@ -163,19 +176,6 @@ pub(super) enum ProjectAndUnifyResult<'tcx> {
 /// ```
 /// If successful, this may result in additional obligations. Also returns
 /// the projection cache key used to track these additional obligations.
-///
-/// ## Returns
-///
-/// - `Err(_)`: the projection can be normalized, but is not equal to the
-///   expected type.
-/// - `Ok(Err(InProgress))`: this is called recursively while normalizing
-///   the same projection.
-/// - `Ok(Ok(None))`: The projection cannot be normalized due to ambiguity
-///   (resolving some inference variables in the projection may fix this).
-/// - `Ok(Ok(Some(obligations)))`: The projection bound holds subject to
-///    the given obligations. If the projection cannot be normalized because
-///    the required trait bound doesn't hold this returned with `obligations`
-///    being a predicate that cannot be proven.
 #[instrument(level = "debug", skip(selcx))]
 pub(super) fn poly_project_and_unify_type<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
@@ -514,7 +514,7 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
                             self.selcx.infcx().report_overflow_error(&obligation, true);
                         }
 
-                        let substs = substs.super_fold_with(self);
+                        let substs = substs.fold_with(self);
                         let generic_ty = self.tcx().bound_type_of(def_id);
                         let concrete_ty = generic_ty.subst(self.tcx(), substs);
                         self.depth += 1;
@@ -531,8 +531,7 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
                 // placeholders (see branch below). *Also*, we know that we can
                 // register an obligation to *later* project, since we know
                 // there won't be bound vars there.
-
-                let data = data.super_fold_with(self);
+                let data = data.fold_with(self);
                 let normalized_ty = if self.eager_inference_replacement {
                     normalize_projection_type(
                         self.selcx,
@@ -581,7 +580,7 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
                 let infcx = self.selcx.infcx();
                 let (data, mapped_regions, mapped_types, mapped_consts) =
                     BoundVarReplacer::replace_bound_vars(infcx, &mut self.universes, data);
-                let data = data.super_fold_with(self);
+                let data = data.fold_with(self);
                 let normalized_ty = opt_normalize_projection_type(
                     self.selcx,
                     self.param_env,
@@ -619,11 +618,14 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn fold_const(&mut self, constant: ty::Const<'tcx>) -> ty::Const<'tcx> {
         if self.selcx.tcx().lazy_normalization() || !self.eager_inference_replacement {
             constant
         } else {
             let constant = constant.super_fold_with(self);
+            debug!(?constant);
+            debug!("self.param_env: {:?}", self.param_env);
             constant.eval(self.selcx.tcx(), self.param_env)
         }
     }
@@ -671,7 +673,7 @@ impl<'me, 'tcx> BoundVarReplacer<'me, 'tcx> {
             universe_indices,
         };
 
-        let value = value.super_fold_with(&mut replacer);
+        let value = value.fold_with(&mut replacer);
 
         (value, replacer.mapped_regions, replacer.mapped_types, replacer.mapped_consts)
     }
@@ -743,7 +745,7 @@ impl<'tcx> TypeFolder<'tcx> for BoundVarReplacer<'_, 'tcx> {
     }
 
     fn fold_const(&mut self, ct: ty::Const<'tcx>) -> ty::Const<'tcx> {
-        match ct.val() {
+        match ct.kind() {
             ty::ConstKind::Bound(debruijn, _)
                 if debruijn.as_usize() + 1
                     > self.current_index.as_usize() + self.universe_indices.len() =>
@@ -759,7 +761,7 @@ impl<'tcx> TypeFolder<'tcx> for BoundVarReplacer<'_, 'tcx> {
                 self.mapped_consts.insert(p, bound_const);
                 self.infcx
                     .tcx
-                    .mk_const(ty::ConstS { val: ty::ConstKind::Placeholder(p), ty: ct.ty() })
+                    .mk_const(ty::ConstS { kind: ty::ConstKind::Placeholder(p), ty: ct.ty() })
             }
             _ if ct.has_vars_bound_at_or_above(self.current_index) => ct.super_fold_with(self),
             _ => ct,
@@ -773,7 +775,7 @@ pub struct PlaceholderReplacer<'me, 'tcx> {
     mapped_regions: BTreeMap<ty::PlaceholderRegion, ty::BoundRegion>,
     mapped_types: BTreeMap<ty::PlaceholderType, ty::BoundTy>,
     mapped_consts: BTreeMap<ty::PlaceholderConst<'tcx>, ty::BoundVar>,
-    universe_indices: &'me Vec<Option<ty::UniverseIndex>>,
+    universe_indices: &'me [Option<ty::UniverseIndex>],
     current_index: ty::DebruijnIndex,
 }
 
@@ -783,7 +785,7 @@ impl<'me, 'tcx> PlaceholderReplacer<'me, 'tcx> {
         mapped_regions: BTreeMap<ty::PlaceholderRegion, ty::BoundRegion>,
         mapped_types: BTreeMap<ty::PlaceholderType, ty::BoundTy>,
         mapped_consts: BTreeMap<ty::PlaceholderConst<'tcx>, ty::BoundVar>,
-        universe_indices: &'me Vec<Option<ty::UniverseIndex>>,
+        universe_indices: &'me [Option<ty::UniverseIndex>],
         value: T,
     ) -> T {
         let mut replacer = PlaceholderReplacer {
@@ -794,7 +796,7 @@ impl<'me, 'tcx> PlaceholderReplacer<'me, 'tcx> {
             universe_indices,
             current_index: ty::INNERMOST,
         };
-        value.super_fold_with(&mut replacer)
+        value.fold_with(&mut replacer)
     }
 }
 
@@ -879,7 +881,7 @@ impl<'tcx> TypeFolder<'tcx> for PlaceholderReplacer<'_, 'tcx> {
     }
 
     fn fold_const(&mut self, ct: ty::Const<'tcx>) -> ty::Const<'tcx> {
-        if let ty::ConstKind::Placeholder(p) = ct.val() {
+        if let ty::ConstKind::Placeholder(p) = ct.kind() {
             let replace_var = self.mapped_consts.get(&p);
             match replace_var {
                 Some(replace_var) => {
@@ -892,7 +894,7 @@ impl<'tcx> TypeFolder<'tcx> for PlaceholderReplacer<'_, 'tcx> {
                         self.universe_indices.len() - index + self.current_index.as_usize() - 1,
                     );
                     self.tcx().mk_const(ty::ConstS {
-                        val: ty::ConstKind::Bound(db, *replace_var),
+                        kind: ty::ConstKind::Bound(db, *replace_var),
                         ty: ct.ty(),
                     })
                 }
@@ -1921,7 +1923,7 @@ fn confirm_param_env_candidate<'cx, 'tcx>(
     let cause = &obligation.cause;
     let param_env = obligation.param_env;
 
-    let (cache_entry, _) = infcx.replace_bound_vars_with_fresh_vars(
+    let cache_entry = infcx.replace_bound_vars_with_fresh_vars(
         cause.span,
         LateBoundRegionConversionTime::HigherRankedType,
         poly_cache_entry,
@@ -2019,8 +2021,8 @@ fn confirm_impl_candidate<'cx, 'tcx>(
         let identity_substs =
             crate::traits::InternalSubsts::identity_for_item(tcx, assoc_ty.item.def_id);
         let did = ty::WithOptConstParam::unknown(assoc_ty.item.def_id);
-        let val = ty::ConstKind::Unevaluated(ty::Unevaluated::new(did, identity_substs));
-        tcx.mk_const(ty::ConstS { ty, val }).into()
+        let kind = ty::ConstKind::Unevaluated(ty::Unevaluated::new(did, identity_substs));
+        tcx.mk_const(ty::ConstS { ty, kind }).into()
     } else {
         ty.into()
     };

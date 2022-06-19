@@ -9,7 +9,7 @@
 use rustc_middle::traits::ChalkRustInterner as RustInterner;
 use rustc_middle::ty::subst::{InternalSubsts, Subst, SubstsRef};
 use rustc_middle::ty::{
-    self, AssocItemContainer, AssocKind, EarlyBinder, Ty, TyCtxt, TypeFoldable,
+    self, AssocItemContainer, AssocKind, EarlyBinder, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable,
 };
 
 use rustc_ast::ast;
@@ -736,7 +736,7 @@ fn bound_vars_for_item<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> SubstsRef<'tcx
 
         ty::GenericParamDefKind::Const { .. } => tcx
             .mk_const(ty::ConstS {
-                val: ty::ConstKind::Bound(ty::INNERMOST, ty::BoundVar::from(param.index)),
+                kind: ty::ConstKind::Bound(ty::INNERMOST, ty::BoundVar::from(param.index)),
                 ty: tcx.type_of(param.def_id),
             })
             .into(),

@@ -13,10 +13,13 @@ use rustc_ast::tokenstream::Spacing;
 use rustc_ast::util::classify;
 use rustc_ast::util::literal::LitError;
 use rustc_ast::util::parser::{prec_let_scrutinee_needs_par, AssocOp, Fixity};
+use rustc_ast::visit::Visitor;
+use rustc_ast::StmtKind;
 use rustc_ast::{self as ast, AttrStyle, AttrVec, CaptureBy, ExprField, Lit, UnOp, DUMMY_NODE_ID};
 use rustc_ast::{AnonConst, BinOp, BinOpKind, FnDecl, FnRetTy, MacCall, Param, Ty, TyKind};
 use rustc_ast::{Arm, Async, BlockCheckMode, Expr, ExprKind, Label, Movability, RangeLimits};
 use rustc_ast_pretty::pprust;
+use rustc_data_structures::thin_vec::ThinVec;
 use rustc_errors::{Applicability, Diagnostic, DiagnosticBuilder, ErrorGuaranteed, PResult};
 use rustc_session::lint::builtin::BREAK_WITH_LABEL_AND_LOOP;
 use rustc_session::lint::BuiltinLintDiagnostics;
@@ -227,7 +230,7 @@ impl<'a> Parser<'a> {
                     .span_suggestion_short(
                         sp,
                         &format!("`{s}=` is not a valid comparison operator, use `{s}`", s = sugg),
-                        sugg.to_string(),
+                        sugg,
                         Applicability::MachineApplicable,
                     )
                     .emit();
@@ -244,7 +247,7 @@ impl<'a> Parser<'a> {
                     .span_suggestion_short(
                         sp,
                         "`<>` is not a valid comparison operator, use `!=`",
-                        "!=".to_string(),
+                        "!=",
                         Applicability::MachineApplicable,
                     )
                     .emit();
@@ -456,7 +459,7 @@ impl<'a> Parser<'a> {
             .span_suggestion_short(
                 self.token.span,
                 &format!("use `{good}` to perform logical {english}"),
-                good.to_string(),
+                good,
                 Applicability::MachineApplicable,
             )
             .note("unlike in e.g., python and PHP, `&&` and `||` are used for logical operators")
@@ -581,7 +584,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion_verbose(
                         lo,
                         "try removing the `+`",
-                        "".to_string(),
+                        "",
                         Applicability::MachineApplicable,
                     );
                 }
@@ -631,7 +634,7 @@ impl<'a> Parser<'a> {
             .span_suggestion_short(
                 lo,
                 "use `!` to perform bitwise not",
-                "!".to_owned(),
+                "!",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -670,7 +673,7 @@ impl<'a> Parser<'a> {
             // trailing whitespace after the `!` in our suggestion
             self.sess.source_map().span_until_non_whitespace(lo.to(not_token.span)),
             "use `!` to perform logical negation",
-            "!".to_owned(),
+            "!",
             Applicability::MachineApplicable,
         )
         .emit();
@@ -741,7 +744,7 @@ impl<'a> Parser<'a> {
                                     .span_suggestion(
                                         label.ident.span,
                                         "use the correct loop label format",
-                                        label.ident.to_string(),
+                                        label.ident,
                                         Applicability::MachineApplicable,
                                     )
                                     .emit();
@@ -882,7 +885,7 @@ impl<'a> Parser<'a> {
                         "{}remove the type ascription",
                         if is_nightly { "alternatively, " } else { "" }
                     ),
-                    String::new(),
+                    "",
                     if is_nightly {
                         Applicability::MaybeIncorrect
                     } else {
@@ -926,7 +929,7 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 lt_span,
                 "remove the lifetime annotation",
-                String::new(),
+                "",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -977,12 +980,26 @@ impl<'a> Parser<'a> {
 
     fn parse_dot_or_call_expr_with_(&mut self, mut e: P<Expr>, lo: Span) -> PResult<'a, P<Expr>> {
         loop {
-            if self.eat(&token::Question) {
+            let has_question = if self.prev_token.kind == TokenKind::Ident(kw::Return, false) {
+                // we are using noexpect here because we don't expect a `?` directly after a `return`
+                // which could be suggested otherwise
+                self.eat_noexpect(&token::Question)
+            } else {
+                self.eat(&token::Question)
+            };
+            if has_question {
                 // `expr?`
                 e = self.mk_expr(lo.to(self.prev_token.span), ExprKind::Try(e), AttrVec::new());
                 continue;
             }
-            if self.eat(&token::Dot) {
+            let has_dot = if self.prev_token.kind == TokenKind::Ident(kw::Return, false) {
+                // we are using noexpect here because we don't expect a `.` directly after a `return`
+                // which could be suggested otherwise
+                self.eat_noexpect(&token::Dot)
+            } else {
+                self.eat(&token::Dot)
+            };
+            if has_dot {
                 // expr.f
                 e = self.parse_dot_suffix_expr(lo, e)?;
                 continue;
@@ -1417,7 +1434,7 @@ impl<'a> Parser<'a> {
         match self.parse_opt_lit() {
             Some(literal) => {
                 let expr = self.mk_expr(lo.to(self.prev_token.span), ExprKind::Lit(literal), attrs);
-                self.maybe_recover_from_bad_qpath(expr, true)
+                self.maybe_recover_from_bad_qpath(expr)
             }
             None => self.try_macro_suggestion(),
         }
@@ -1444,7 +1461,7 @@ impl<'a> Parser<'a> {
             ExprKind::Tup(es)
         };
         let expr = self.mk_expr(lo.to(self.prev_token.span), kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     fn parse_array_or_repeat_expr(
@@ -1481,7 +1498,7 @@ impl<'a> Parser<'a> {
             }
         };
         let expr = self.mk_expr(lo.to(self.prev_token.span), kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     fn parse_path_start_expr(&mut self, attrs: AttrVec) -> PResult<'a, P<Expr>> {
@@ -1519,7 +1536,7 @@ impl<'a> Parser<'a> {
         };
 
         let expr = self.mk_expr(lo.to(hi), kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     /// Parse `'label: $expr`. The label is already parsed.
@@ -1538,9 +1555,13 @@ impl<'a> Parser<'a> {
             self.parse_for_expr(label, lo, attrs)
         } else if self.eat_keyword(kw::Loop) {
             self.parse_loop_expr(label, lo, attrs)
-        } else if self.check(&token::OpenDelim(Delimiter::Brace)) || self.token.is_whole_block() {
+        } else if self.check_noexpect(&token::OpenDelim(Delimiter::Brace))
+            || self.token.is_whole_block()
+        {
             self.parse_block_expr(label, lo, BlockCheckMode::Default, attrs)
-        } else if !ate_colon && (self.check(&TokenKind::Comma) || self.check(&TokenKind::Gt)) {
+        } else if !ate_colon
+            && (self.check_noexpect(&TokenKind::Comma) || self.check_noexpect(&TokenKind::Gt))
+        {
             // We're probably inside of a `Path<'a>` that needs a turbofish
             let msg = "expected `while`, `for`, `loop` or `{` after a label";
             self.struct_span_err(self.token.span, msg).span_label(self.token.span, msg).emit();
@@ -1548,9 +1569,66 @@ impl<'a> Parser<'a> {
             Ok(self.mk_expr_err(lo))
         } else {
             let msg = "expected `while`, `for`, `loop` or `{` after a label";
-            self.struct_span_err(self.token.span, msg).span_label(self.token.span, msg).emit();
+
+            let mut err = self.struct_span_err(self.token.span, msg);
+            err.span_label(self.token.span, msg);
+
             // Continue as an expression in an effort to recover on `'label: non_block_expr`.
-            self.parse_expr()
+            let expr = self.parse_expr().map(|expr| {
+                let span = expr.span;
+
+                let found_labeled_breaks = {
+                    struct FindLabeledBreaksVisitor(bool);
+
+                    impl<'ast> Visitor<'ast> for FindLabeledBreaksVisitor {
+                        fn visit_expr_post(&mut self, ex: &'ast Expr) {
+                            if let ExprKind::Break(Some(_label), _) = ex.kind {
+                                self.0 = true;
+                            }
+                        }
+                    }
+
+                    let mut vis = FindLabeledBreaksVisitor(false);
+                    vis.visit_expr(&expr);
+                    vis.0
+                };
+
+                // Suggestion involves adding a (as of time of writing this, unstable) labeled block.
+                //
+                // If there are no breaks that may use this label, suggest removing the label and
+                // recover to the unmodified expression.
+                if !found_labeled_breaks {
+                    let msg = "consider removing the label";
+                    err.span_suggestion_verbose(
+                        lo.until(span),
+                        msg,
+                        "",
+                        Applicability::MachineApplicable,
+                    );
+
+                    return expr;
+                }
+
+                let sugg_msg = "consider enclosing expression in a block";
+                let suggestions = vec![
+                    (span.shrink_to_lo(), "{ ".to_owned()),
+                    (span.shrink_to_hi(), " }".to_owned()),
+                ];
+
+                err.multipart_suggestion_verbose(
+                    sugg_msg,
+                    suggestions,
+                    Applicability::MachineApplicable,
+                );
+
+                // Replace `'label: non_block_expr` with `'label: {non_block_expr}` in order to supress future errors about `break 'label`.
+                let stmt = self.mk_stmt(span, StmtKind::Expr(expr));
+                let blk = self.mk_block(vec![stmt], BlockCheckMode::Default, span);
+                self.mk_expr(span, ExprKind::Block(blk, label), ThinVec::new())
+            });
+
+            err.emit();
+            expr
         }?;
 
         if !ate_colon && consume_colon {
@@ -1566,7 +1644,7 @@ impl<'a> Parser<'a> {
             .span_suggestion_short(
                 lo.shrink_to_hi(),
                 "add `:` after the label",
-                ": ".to_string(),
+                ": ",
                 Applicability::MachineApplicable,
             )
             .note("labels are used before loops and blocks, allowing e.g., `break 'label` to them")
@@ -1585,7 +1663,7 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 span_dc,
                 "replace with the new syntax",
-                "try".to_string(),
+                "try",
                 Applicability::MachineApplicable,
             )
             .note("following RFC #2388, the new non-placeholder syntax is `try`")
@@ -1604,7 +1682,7 @@ impl<'a> Parser<'a> {
         let lo = self.prev_token.span;
         let kind = ExprKind::Ret(self.parse_expr_opt()?);
         let expr = self.mk_expr(lo.to(self.prev_token.span), kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     /// Parse `"do" "yeet" expr?`.
@@ -1619,7 +1697,7 @@ impl<'a> Parser<'a> {
         let span = lo.to(self.prev_token.span);
         self.sess.gated_spans.gate(sym::yeet_expr, span);
         let expr = self.mk_expr(span, kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     /// Parse `"break" (('label (:? expr)?) | expr?)` with `"break"` token already eaten.
@@ -1679,7 +1757,7 @@ impl<'a> Parser<'a> {
             None
         };
         let expr = self.mk_expr(lo.to(self.prev_token.span), ExprKind::Break(label, kind), attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     /// Parse `"yield" expr?`.
@@ -1689,7 +1767,7 @@ impl<'a> Parser<'a> {
         let span = lo.to(self.prev_token.span);
         self.sess.gated_spans.gate(sym::generators, span);
         let expr = self.mk_expr(span, kind, attrs);
-        self.maybe_recover_from_bad_qpath(expr, true)
+        self.maybe_recover_from_bad_qpath(expr)
     }
 
     /// Returns a string literal if the next token is a string literal.
@@ -2010,6 +2088,12 @@ impl<'a> Parser<'a> {
         Ok(self.mk_expr(blk.span, ExprKind::Block(blk, opt_label), attrs))
     }
 
+    /// Parse a block which takes no attributes and has no label
+    fn parse_simple_block(&mut self) -> PResult<'a, P<Expr>> {
+        let blk = self.parse_block()?;
+        Ok(self.mk_expr(blk.span, ExprKind::Block(blk, None), AttrVec::new()))
+    }
+
     /// Recover on an explicitly quantified closure expression, e.g., `for<'a> |x: &'a u8| *x + 1`.
     fn recover_quantified_closure_expr(&mut self, attrs: AttrVec) -> PResult<'a, P<Expr>> {
         let lo = self.token.span;
@@ -2022,7 +2106,7 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 span_for,
                 "remove the parameters",
-                String::new(),
+                "",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -2157,35 +2241,66 @@ impl<'a> Parser<'a> {
         let lo = self.prev_token.span;
         let cond = self.parse_cond_expr()?;
 
-        let missing_then_block_binop_span = || {
-            match cond.kind {
-                ExprKind::Binary(Spanned { span: binop_span, .. }, _, ref right)
-                    if let ExprKind::Block(..) = right.kind => Some(binop_span),
-                _ => None
+        self.parse_if_after_cond(attrs, lo, cond)
+    }
+
+    fn parse_if_after_cond(
+        &mut self,
+        attrs: AttrVec,
+        lo: Span,
+        mut cond: P<Expr>,
+    ) -> PResult<'a, P<Expr>> {
+        let cond_span = cond.span;
+        // Tries to interpret `cond` as either a missing expression if it's a block,
+        // or as an unfinished expression if it's a binop and the RHS is a block.
+        // We could probably add more recoveries here too...
+        let mut recover_block_from_condition = |this: &mut Self| {
+            let block = match &mut cond.kind {
+                ExprKind::Binary(Spanned { span: binop_span, .. }, _, right)
+                    if let ExprKind::Block(_, None) = right.kind => {
+                        this.error_missing_if_then_block(lo, cond_span.shrink_to_lo().to(*binop_span), true).emit();
+                        std::mem::replace(right, this.mk_expr_err(binop_span.shrink_to_hi()))
+                    },
+                ExprKind::Block(_, None) => {
+                    this.error_missing_if_cond(lo, cond_span).emit();
+                    std::mem::replace(&mut cond, this.mk_expr_err(cond_span.shrink_to_hi()))
+                }
+                _ => {
+                    return None;
+                }
+            };
+            if let ExprKind::Block(block, _) = &block.kind {
+                Some(block.clone())
+            } else {
+                unreachable!()
             }
         };
-
-        // Verify that the parsed `if` condition makes sense as a condition. If it is a block, then
-        // verify that the last statement is either an implicit return (no `;`) or an explicit
-        // return. This won't catch blocks with an explicit `return`, but that would be caught by
-        // the dead code lint.
-        let thn = if self.token.is_keyword(kw::Else) || !cond.returns() {
-            if let Some(binop_span) = missing_then_block_binop_span() {
-                self.error_missing_if_then_block(lo, None, Some(binop_span)).emit();
-                self.mk_block_err(cond.span)
+        // Parse then block
+        let thn = if self.token.is_keyword(kw::Else) {
+            if let Some(block) = recover_block_from_condition(self) {
+                block
             } else {
-                self.error_missing_if_cond(lo, cond.span)
+                self.error_missing_if_then_block(lo, cond_span, false).emit();
+                self.mk_block_err(cond_span.shrink_to_hi())
             }
         } else {
             let attrs = self.parse_outer_attributes()?.take_for_recovery(); // For recovery.
-            let not_block = self.token != token::OpenDelim(Delimiter::Brace);
-            let block = self.parse_block().map_err(|err| {
-                if not_block {
-                    self.error_missing_if_then_block(lo, Some(err), missing_then_block_binop_span())
+            let block = if self.check(&token::OpenDelim(Delimiter::Brace)) {
+                self.parse_block()?
+            } else {
+                if let Some(block) = recover_block_from_condition(self) {
+                    block
                 } else {
-                    err
+                    // Parse block, which will always fail, but we can add a nice note to the error
+                    self.parse_block().map_err(|mut err| {
+                        err.span_note(
+                            cond_span,
+                            "the `if` expression is missing a block after this condition",
+                        );
+                        err
+                    })?
                 }
-            })?;
+            };
             self.error_on_if_block_attrs(lo, false, block.span, &attrs);
             block
         };
@@ -2196,31 +2311,34 @@ impl<'a> Parser<'a> {
     fn error_missing_if_then_block(
         &self,
         if_span: Span,
-        err: Option<DiagnosticBuilder<'a, ErrorGuaranteed>>,
-        binop_span: Option<Span>,
+        cond_span: Span,
+        is_unfinished: bool,
     ) -> DiagnosticBuilder<'a, ErrorGuaranteed> {
-        let msg = "this `if` expression has a condition, but no block";
-
-        let mut err = if let Some(mut err) = err {
-            err.span_label(if_span, msg);
-            err
+        let mut err = self.struct_span_err(
+            if_span,
+            "this `if` expression is missing a block after the condition",
+        );
+        if is_unfinished {
+            err.span_help(cond_span, "this binary operation is possibly unfinished");
         } else {
-            self.struct_span_err(if_span, msg)
-        };
-
-        if let Some(binop_span) = binop_span {
-            err.span_help(binop_span, "maybe you forgot the right operand of the condition?");
+            err.span_help(cond_span.shrink_to_hi(), "add a block here");
         }
-
         err
     }
 
-    fn error_missing_if_cond(&self, lo: Span, span: Span) -> P<ast::Block> {
-        let sp = self.sess.source_map().next_point(lo);
-        self.struct_span_err(sp, "missing condition for `if` expression")
-            .span_label(sp, "expected if condition here")
-            .emit();
-        self.mk_block_err(span)
+    fn error_missing_if_cond(
+        &self,
+        lo: Span,
+        span: Span,
+    ) -> DiagnosticBuilder<'a, ErrorGuaranteed> {
+        let next_span = self.sess.source_map().next_point(lo);
+        let mut err = self.struct_span_err(next_span, "missing condition for `if` expression");
+        err.span_label(next_span, "expected condition here");
+        err.span_label(
+            self.sess.source_map().start_point(span),
+            "if this block is the condition of the `if` expression, then it must be followed by another block"
+        );
+        err
     }
 
     /// Parses the condition of a `if` or `while` expression.
@@ -2256,15 +2374,46 @@ impl<'a> Parser<'a> {
 
     /// Parses an `else { ... }` expression (`else` token already eaten).
     fn parse_else_expr(&mut self) -> PResult<'a, P<Expr>> {
-        let ctx_span = self.prev_token.span; // `else`
+        let else_span = self.prev_token.span; // `else`
         let attrs = self.parse_outer_attributes()?.take_for_recovery(); // For recovery.
         let expr = if self.eat_keyword(kw::If) {
             self.parse_if_expr(AttrVec::new())?
+        } else if self.check(&TokenKind::OpenDelim(Delimiter::Brace)) {
+            self.parse_simple_block()?
         } else {
-            let blk = self.parse_block()?;
-            self.mk_expr(blk.span, ExprKind::Block(blk, None), AttrVec::new())
+            let snapshot = self.create_snapshot_for_diagnostic();
+            let first_tok = super::token_descr(&self.token);
+            let first_tok_span = self.token.span;
+            match self.parse_expr() {
+                Ok(cond)
+                // If it's not a free-standing expression, and is followed by a block,
+                // then it's very likely the condition to an `else if`.
+                    if self.check(&TokenKind::OpenDelim(Delimiter::Brace))
+                        && classify::expr_requires_semi_to_be_stmt(&cond) =>
+                {
+                    self.struct_span_err(first_tok_span, format!("expected `{{`, found {first_tok}"))
+                        .span_label(else_span, "expected an `if` or a block after this `else`")
+                        .span_suggestion(
+                            cond.span.shrink_to_lo(),
+                            "add an `if` if this is the condition of a chained `else if` statement",
+                            "if ",
+                            Applicability::MaybeIncorrect,
+                        )
+                        .emit();
+                    self.parse_if_after_cond(AttrVec::new(), cond.span.shrink_to_lo(), cond)?
+                }
+                Err(e) => {
+                    e.cancel();
+                    self.restore_snapshot(snapshot);
+                    self.parse_simple_block()?
+                },
+                Ok(_) => {
+                    self.restore_snapshot(snapshot);
+                    self.parse_simple_block()?
+                },
+            }
         };
-        self.error_on_if_block_attrs(ctx_span, true, expr.span, &attrs);
+        self.error_on_if_block_attrs(else_span, true, expr.span, &attrs);
         Ok(expr)
     }
 
@@ -2283,12 +2432,7 @@ impl<'a> Parser<'a> {
         self.struct_span_err(last, "outer attributes are not allowed on `if` and `else` branches")
             .span_label(branch_span, "the attributes are attached to this branch")
             .span_label(ctx_span, format!("the branch belongs to this `{ctx}`"))
-            .span_suggestion(
-                span,
-                "remove the attributes",
-                String::new(),
-                Applicability::MachineApplicable,
-            )
+            .span_suggestion(span, "remove the attributes", "", Applicability::MachineApplicable)
             .emit();
     }
 
@@ -2397,7 +2541,7 @@ impl<'a> Parser<'a> {
                 e.span_suggestion_short(
                     match_span,
                     "try removing this `match`",
-                    String::new(),
+                    "",
                     Applicability::MaybeIncorrect, // speculative
                 );
             }
@@ -2473,7 +2617,7 @@ impl<'a> Parser<'a> {
                 err.span_suggestion(
                     semi_sp,
                     "use a comma to end a `match` arm expression",
-                    ",".to_string(),
+                    ",",
                     Applicability::MachineApplicable,
                 );
             }
@@ -2574,7 +2718,7 @@ impl<'a> Parser<'a> {
                     err.span_suggestion(
                         this.token.span,
                         "try using a fat arrow here",
-                        "=>".to_string(),
+                        "=>",
                         Applicability::MaybeIncorrect,
                     );
                     err.emit();
@@ -2613,13 +2757,12 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 this.expect_one_of(&[token::Comma], &[token::CloseDelim(Delimiter::Brace)])
-                    .map_err(|mut err| {
-                        match (sm.span_to_lines(expr.span), sm.span_to_lines(arm_start_span)) {
-                            (Ok(ref expr_lines), Ok(ref arm_start_lines))
-                                if arm_start_lines.lines[0].end_col
-                                    == expr_lines.lines[0].end_col
-                                    && expr_lines.lines.len() == 2
-                                    && this.token == token::FatArrow =>
+                    .or_else(|mut err| {
+                        if this.token == token::FatArrow {
+                            if let Ok(expr_lines) = sm.span_to_lines(expr.span)
+                            && let Ok(arm_start_lines) = sm.span_to_lines(arm_start_span)
+                            && arm_start_lines.lines[0].end_col == expr_lines.lines[0].end_col
+                            && expr_lines.lines.len() == 2
                             {
                                 // We check whether there's any trailing code in the parse span,
                                 // if there isn't, we very likely have the following:
@@ -2635,18 +2778,44 @@ impl<'a> Parser<'a> {
                                 err.span_suggestion_short(
                                     arm_start_span.shrink_to_hi(),
                                     "missing a comma here to end this `match` arm",
-                                    ",".to_owned(),
+                                    ",",
                                     Applicability::MachineApplicable,
                                 );
+                                return Err(err);
                             }
-                            _ => {
-                                err.span_label(
-                                    arrow_span,
-                                    "while parsing the `match` arm starting here",
-                                );
+                        } else {
+                            // FIXME(compiler-errors): We could also recover `; PAT =>` here
+
+                            // Try to parse a following `PAT =>`, if successful
+                            // then we should recover.
+                            let mut snapshot = this.create_snapshot_for_diagnostic();
+                            let pattern_follows = snapshot
+                                .parse_pat_allow_top_alt(
+                                    None,
+                                    RecoverComma::Yes,
+                                    RecoverColon::Yes,
+                                    CommaRecoveryMode::EitherTupleOrPipe,
+                                )
+                                .map_err(|err| err.cancel())
+                                .is_ok();
+                            if pattern_follows && snapshot.check(&TokenKind::FatArrow) {
+                                err.cancel();
+                                this.struct_span_err(
+                                    hi.shrink_to_hi(),
+                                    "expected `,` following `match` arm",
+                                )
+                                .span_suggestion(
+                                    hi.shrink_to_hi(),
+                                    "missing a comma here to end this `match` arm",
+                                    ",",
+                                    Applicability::MachineApplicable,
+                                )
+                                .emit();
+                                return Ok(true);
                             }
                         }
-                        err
+                        err.span_label(arrow_span, "while parsing the `match` arm starting here");
+                        Err(err)
                     })?;
             } else {
                 this.eat(&token::Comma);
@@ -2919,7 +3088,7 @@ impl<'a> Parser<'a> {
         .span_suggestion_short(
             self.token.span,
             "remove this comma",
-            String::new(),
+            "",
             Applicability::MachineApplicable,
         )
         .note("the base struct must always be the last field")
@@ -2973,7 +3142,7 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 field_name.span.shrink_to_hi().to(self.token.span),
                 "replace equals symbol with a colon",
-                ":".to_string(),
+                ":",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -2984,13 +3153,13 @@ impl<'a> Parser<'a> {
             .span_suggestion(
                 span,
                 "use `..` for an exclusive range",
-                "..".to_owned(),
+                "..",
                 Applicability::MaybeIncorrect,
             )
             .span_suggestion(
                 span,
                 "or `..=` for an inclusive range",
-                "..=".to_owned(),
+                "..=",
                 Applicability::MaybeIncorrect,
             )
             .emit();
@@ -3002,7 +3171,7 @@ impl<'a> Parser<'a> {
                 span,
                 "if you meant to write a comparison against a negative value, add a \
              space in between `<` and `-`",
-                "< -".to_string(),
+                "< -",
                 Applicability::MaybeIncorrect,
             )
             .emit();

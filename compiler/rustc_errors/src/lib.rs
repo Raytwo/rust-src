@@ -8,8 +8,8 @@
 #![feature(if_let_guard)]
 #![feature(let_else)]
 #![feature(never_type)]
-#![feature(nll)]
 #![feature(adt_const_params)]
+#![feature(rustc_attrs)]
 #![allow(incomplete_features)]
 #![allow(rustc::potential_query_instability)]
 
@@ -31,8 +31,9 @@ use rustc_data_structures::stable_hasher::StableHasher;
 use rustc_data_structures::sync::{self, Lock, Lrc};
 use rustc_data_structures::AtomicRef;
 pub use rustc_error_messages::{
-    fallback_fluent_bundle, fluent_bundle, DiagnosticMessage, FluentBundle, LanguageIdentifier,
-    LazyFallbackBundle, MultiSpan, SpanLabel, DEFAULT_LOCALE_RESOURCES,
+    fallback_fluent_bundle, fluent, fluent_bundle, DiagnosticMessage, FluentBundle,
+    LanguageIdentifier, LazyFallbackBundle, MultiSpan, SpanLabel, SubdiagnosticMessage,
+    DEFAULT_LOCALE_RESOURCES,
 };
 pub use rustc_lint_defs::{pluralize, Applicability};
 use rustc_span::source_map::SourceMap;
@@ -400,6 +401,9 @@ struct HandlerInner {
     emitter: Box<dyn Emitter + sync::Send>,
     delayed_span_bugs: Vec<Diagnostic>,
     delayed_good_path_bugs: Vec<DelayedDiagnostic>,
+    /// This flag indicates that an expected diagnostic was emitted and suppressed.
+    /// This is used for the `delayed_good_path_bugs` check.
+    suppressed_expected_diag: bool,
 
     /// This set contains the `DiagnosticId` of all emitted diagnostics to avoid
     /// emitting the same diagnostic with extended help (`--teach`) twice, which
@@ -495,7 +499,7 @@ impl Drop for HandlerInner {
         // instead of "require some error happened". Sadly that isn't ideal, as
         // lints can be `#[allow]`'d, potentially leading to this triggering.
         // Also, "good path" should be replaced with a better naming.
-        if !self.has_any_message() {
+        if !self.has_any_message() && !self.suppressed_expected_diag {
             let bugs = std::mem::replace(&mut self.delayed_good_path_bugs, Vec::new());
             self.flush_delayed(
                 bugs.into_iter().map(DelayedDiagnostic::decorate),
@@ -577,6 +581,7 @@ impl Handler {
                 emitter,
                 delayed_span_bugs: Vec::new(),
                 delayed_good_path_bugs: Vec::new(),
+                suppressed_expected_diag: false,
                 taught_diagnostics: Default::default(),
                 emitted_diagnostic_codes: Default::default(),
                 emitted_diagnostics: Default::default(),
@@ -644,6 +649,7 @@ impl Handler {
     /// Attempting to `.emit()` the builder will only emit if either:
     /// * `can_emit_warnings` is `true`
     /// * `is_force_warn` was set in `DiagnosticId::Lint`
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_warn(
         &self,
         span: impl Into<MultiSpan>,
@@ -654,7 +660,25 @@ impl Handler {
         result
     }
 
+    /// Construct a builder at the `Warning` level at the given `span` and with the `msg`.
+    /// The `id` is used for lint emissions which should also fulfill a lint expectation.
+    ///
+    /// Attempting to `.emit()` the builder will only emit if either:
+    /// * `can_emit_warnings` is `true`
+    /// * `is_force_warn` was set in `DiagnosticId::Lint`
+    pub fn struct_span_warn_with_expectation(
+        &self,
+        span: impl Into<MultiSpan>,
+        msg: impl Into<DiagnosticMessage>,
+        id: LintExpectationId,
+    ) -> DiagnosticBuilder<'_, ()> {
+        let mut result = self.struct_warn_with_expectation(msg, id);
+        result.set_span(span);
+        result
+    }
+
     /// Construct a builder at the `Allow` level at the given `span` and with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_allow(
         &self,
         span: impl Into<MultiSpan>,
@@ -667,6 +691,7 @@ impl Handler {
 
     /// Construct a builder at the `Warning` level at the given `span` and with the `msg`.
     /// Also include a code.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_warn_with_code(
         &self,
         span: impl Into<MultiSpan>,
@@ -683,16 +708,33 @@ impl Handler {
     /// Attempting to `.emit()` the builder will only emit if either:
     /// * `can_emit_warnings` is `true`
     /// * `is_force_warn` was set in `DiagnosticId::Lint`
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_warn(&self, msg: impl Into<DiagnosticMessage>) -> DiagnosticBuilder<'_, ()> {
-        DiagnosticBuilder::new(self, Level::Warning, msg)
+        DiagnosticBuilder::new(self, Level::Warning(None), msg)
+    }
+
+    /// Construct a builder at the `Warning` level with the `msg`. The `id` is used for
+    /// lint emissions which should also fulfill a lint expectation.
+    ///
+    /// Attempting to `.emit()` the builder will only emit if either:
+    /// * `can_emit_warnings` is `true`
+    /// * `is_force_warn` was set in `DiagnosticId::Lint`
+    pub fn struct_warn_with_expectation(
+        &self,
+        msg: impl Into<DiagnosticMessage>,
+        id: LintExpectationId,
+    ) -> DiagnosticBuilder<'_, ()> {
+        DiagnosticBuilder::new(self, Level::Warning(Some(id)), msg)
     }
 
     /// Construct a builder at the `Allow` level with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_allow(&self, msg: impl Into<DiagnosticMessage>) -> DiagnosticBuilder<'_, ()> {
         DiagnosticBuilder::new(self, Level::Allow, msg)
     }
 
     /// Construct a builder at the `Expect` level with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_expect(
         &self,
         msg: impl Into<DiagnosticMessage>,
@@ -702,6 +744,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Error` level at the given `span` and with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_err(
         &self,
         span: impl Into<MultiSpan>,
@@ -713,6 +756,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Error` level at the given `span`, with the `msg`, and `code`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_err_with_code(
         &self,
         span: impl Into<MultiSpan>,
@@ -726,6 +770,7 @@ impl Handler {
 
     /// Construct a builder at the `Error` level with the `msg`.
     // FIXME: This method should be removed (every error should have an associated error code).
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_err(
         &self,
         msg: impl Into<DiagnosticMessage>,
@@ -740,6 +785,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Error` level with the `msg` and the `code`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_err_with_code(
         &self,
         msg: impl Into<DiagnosticMessage>,
@@ -751,6 +797,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Warn` level with the `msg` and the `code`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_warn_with_code(
         &self,
         msg: impl Into<DiagnosticMessage>,
@@ -762,6 +809,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Fatal` level at the given `span` and with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_fatal(
         &self,
         span: impl Into<MultiSpan>,
@@ -773,6 +821,7 @@ impl Handler {
     }
 
     /// Construct a builder at the `Fatal` level at the given `span`, with the `msg`, and `code`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_span_fatal_with_code(
         &self,
         span: impl Into<MultiSpan>,
@@ -785,16 +834,19 @@ impl Handler {
     }
 
     /// Construct a builder at the `Error` level with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_fatal(&self, msg: impl Into<DiagnosticMessage>) -> DiagnosticBuilder<'_, !> {
         DiagnosticBuilder::new_fatal(self, msg)
     }
 
     /// Construct a builder at the `Help` level with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_help(&self, msg: impl Into<DiagnosticMessage>) -> DiagnosticBuilder<'_, ()> {
         DiagnosticBuilder::new(self, Level::Help, msg)
     }
 
     /// Construct a builder at the `Note` level with the `msg`.
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn struct_note_without_error(
         &self,
         msg: impl Into<DiagnosticMessage>,
@@ -802,11 +854,13 @@ impl Handler {
         DiagnosticBuilder::new(self, Level::Note, msg)
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_fatal(&self, span: impl Into<MultiSpan>, msg: impl Into<DiagnosticMessage>) -> ! {
         self.emit_diag_at_span(Diagnostic::new(Fatal, msg), span);
         FatalError.raise()
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_fatal_with_code(
         &self,
         span: impl Into<MultiSpan>,
@@ -817,6 +871,7 @@ impl Handler {
         FatalError.raise()
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_err(
         &self,
         span: impl Into<MultiSpan>,
@@ -825,6 +880,7 @@ impl Handler {
         self.emit_diag_at_span(Diagnostic::new(Error { lint: false }, msg), span).unwrap()
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_err_with_code(
         &self,
         span: impl Into<MultiSpan>,
@@ -837,17 +893,19 @@ impl Handler {
         );
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_warn(&self, span: impl Into<MultiSpan>, msg: impl Into<DiagnosticMessage>) {
-        self.emit_diag_at_span(Diagnostic::new(Warning, msg), span);
+        self.emit_diag_at_span(Diagnostic::new(Warning(None), msg), span);
     }
 
+    #[cfg_attr(not(bootstrap), rustc_lint_diagnostics)]
     pub fn span_warn_with_code(
         &self,
         span: impl Into<MultiSpan>,
         msg: impl Into<DiagnosticMessage>,
         code: DiagnosticId,
     ) {
-        self.emit_diag_at_span(Diagnostic::new_with_code(Warning, Some(code), msg), span);
+        self.emit_diag_at_span(Diagnostic::new_with_code(Warning(None), Some(code), msg), span);
     }
 
     pub fn span_bug(&self, span: impl Into<MultiSpan>, msg: impl Into<DiagnosticMessage>) -> ! {
@@ -901,7 +959,7 @@ impl Handler {
     }
 
     pub fn warn(&self, msg: impl Into<DiagnosticMessage>) {
-        let mut db = DiagnosticBuilder::new(self, Warning, msg);
+        let mut db = DiagnosticBuilder::new(self, Warning(None), msg);
         db.emit();
     }
 
@@ -1000,20 +1058,17 @@ impl Handler {
         let mut inner = self.inner.borrow_mut();
         let diags = std::mem::take(&mut inner.unstable_expect_diagnostics);
         inner.check_unstable_expect_diagnostics = true;
-        if diags.is_empty() {
-            return;
-        }
 
-        for mut diag in diags.into_iter() {
-            diag.update_unstable_expectation_id(unstable_to_stable);
+        if !diags.is_empty() {
+            inner.suppressed_expected_diag = true;
+            for mut diag in diags.into_iter() {
+                diag.update_unstable_expectation_id(unstable_to_stable);
 
-            let stable_id = diag
-                .level
-                .get_expectation_id()
-                .expect("all diagnostics inside `unstable_expect_diagnostics` must have a `LintExpectationId`");
-            inner.fulfilled_expectations.insert(stable_id);
-
-            (*TRACK_DIAGNOSTICS)(&diag);
+                // Here the diagnostic is given back to `emit_diagnostic` where it was first
+                // intercepted. Now it should be processed as usual, since the unstable expectation
+                // id is now stable.
+                inner.emit_diagnostic(&mut diag);
+            }
         }
 
         inner
@@ -1062,6 +1117,15 @@ impl HandlerInner {
 
     // FIXME(eddyb) this should ideally take `diagnostic` by value.
     fn emit_diagnostic(&mut self, diagnostic: &mut Diagnostic) -> Option<ErrorGuaranteed> {
+        // The `LintExpectationId` can be stable or unstable depending on when it was created.
+        // Diagnostics created before the definition of `HirId`s are unstable and can not yet
+        // be stored. Instead, they are buffered until the `LintExpectationId` is replaced by
+        // a stable one by the `LintLevelsBuilder`.
+        if let Some(LintExpectationId::Unstable { .. }) = diagnostic.level.get_expectation_id() {
+            self.unstable_expect_diagnostics.push(diagnostic.clone());
+            return None;
+        }
+
         if diagnostic.level == Level::DelayedBug {
             // FIXME(eddyb) this should check for `has_errors` and stop pushing
             // once *any* errors were emitted (and truncate `delayed_span_bugs`
@@ -1078,7 +1142,12 @@ impl HandlerInner {
             self.future_breakage_diagnostics.push(diagnostic.clone());
         }
 
-        if diagnostic.level == Warning
+        if let Some(expectation_id) = diagnostic.level.get_expectation_id() {
+            self.suppressed_expected_diag = true;
+            self.fulfilled_expectations.insert(expectation_id);
+        }
+
+        if matches!(diagnostic.level, Warning(_))
             && !self.flags.can_emit_warnings
             && !diagnostic.is_force_warn()
         {
@@ -1088,21 +1157,9 @@ impl HandlerInner {
             return None;
         }
 
-        // The `LintExpectationId` can be stable or unstable depending on when it was created.
-        // Diagnostics created before the definition of `HirId`s are unstable and can not yet
-        // be stored. Instead, they are buffered until the `LintExpectationId` is replaced by
-        // a stable one by the `LintLevelsBuilder`.
-        if let Level::Expect(LintExpectationId::Unstable { .. }) = diagnostic.level {
-            self.unstable_expect_diagnostics.push(diagnostic.clone());
-            return None;
-        }
-
         (*TRACK_DIAGNOSTICS)(diagnostic);
 
-        if let Level::Expect(expectation_id) = diagnostic.level {
-            self.fulfilled_expectations.insert(expectation_id);
-            return None;
-        } else if diagnostic.level == Allow {
+        if matches!(diagnostic.level, Level::Expect(_) | Level::Allow) {
             return None;
         }
 
@@ -1117,7 +1174,7 @@ impl HandlerInner {
             !this.emitted_diagnostics.insert(diagnostic_hash)
         };
 
-        // Only emit the diagnostic if we've been asked to deduplicate and
+        // Only emit the diagnostic if we've been asked to deduplicate or
         // haven't already emitted an equivalent diagnostic.
         if !(self.flags.deduplicate_diagnostics && already_emitted(self)) {
             debug!(?diagnostic);
@@ -1139,7 +1196,7 @@ impl HandlerInner {
             self.emitter.emit_diagnostic(&diagnostic);
             if diagnostic.is_error() {
                 self.deduplicated_err_count += 1;
-            } else if diagnostic.level == Warning {
+            } else if let Warning(_) = diagnostic.level {
                 self.deduplicated_warn_count += 1;
             }
         }
@@ -1192,7 +1249,7 @@ impl HandlerInner {
         match (errors.len(), warnings.len()) {
             (0, 0) => return,
             (0, _) => self.emitter.emit_diagnostic(&Diagnostic::new(
-                Level::Warning,
+                Level::Warning(None),
                 DiagnosticMessage::Str(warnings),
             )),
             (_, 0) => {
@@ -1425,7 +1482,10 @@ pub enum Level {
         /// If this error comes from a lint, don't abort compilation even when abort_if_errors() is called.
         lint: bool,
     },
-    Warning,
+    /// This [`LintExpectationId`] is used for expected lint diagnostics, which should
+    /// also emit a warning due to the `force-warn` flag. In all other cases this should
+    /// be `None`.
+    Warning(Option<LintExpectationId>),
     Note,
     /// A note that is only emitted once.
     OnceNote,
@@ -1448,7 +1508,7 @@ impl Level {
             Bug | DelayedBug | Fatal | Error { .. } => {
                 spec.set_fg(Some(Color::Red)).set_intense(true);
             }
-            Warning => {
+            Warning(_) => {
                 spec.set_fg(Some(Color::Yellow)).set_intense(cfg!(windows));
             }
             Note | OnceNote => {
@@ -1467,7 +1527,7 @@ impl Level {
         match self {
             Bug | DelayedBug => "error: internal compiler error",
             Fatal | Error { .. } => "error",
-            Warning => "warning",
+            Warning(_) => "warning",
             Note | OnceNote => "note",
             Help => "help",
             FailureNote => "failure-note",
@@ -1482,7 +1542,7 @@ impl Level {
 
     pub fn get_expectation_id(&self) -> Option<LintExpectationId> {
         match self {
-            Level::Expect(id) => Some(*id),
+            Level::Expect(id) | Level::Warning(Some(id)) => Some(*id),
             _ => None,
         }
     }

@@ -572,12 +572,6 @@ impl Step for Miri {
                 return;
             }
 
-            // # Run `cargo test` with `-Zmir-opt-level=4`.
-            cargo.env("MIRIFLAGS", "-O -Zmir-opt-level=4");
-            if !try_run(builder, &mut cargo) {
-                return;
-            }
-
             // # Done!
             builder.save_toolstate("miri", ToolState::TestPass);
         } else {
@@ -1016,7 +1010,7 @@ impl Step for Tidy {
 
         if builder.config.channel == "dev" || builder.config.channel == "nightly" {
             builder.info("fmt check");
-            if builder.config.initial_rustfmt.is_none() {
+            if builder.initial_rustfmt().is_none() {
                 let inferred_rustfmt_dir = builder.config.initial_rustc.parent().unwrap();
                 eprintln!(
                     "\
@@ -1029,7 +1023,7 @@ help: to skip test's attempt to check tidiness, pass `--exclude src/tools/tidy` 
                 );
                 std::process::exit(1);
             }
-            crate::format::format(&builder.build, !builder.config.cmd.bless(), &[]);
+            crate::format::format(&builder, !builder.config.cmd.bless(), &[]);
         }
     }
 
@@ -1173,12 +1167,7 @@ macro_rules! test_definitions {
     };
 }
 
-default_test_with_compare_mode!(Ui {
-    path: "src/test/ui",
-    mode: "ui",
-    suite: "ui",
-    compare_mode: "nll"
-});
+default_test!(Ui { path: "src/test/ui", mode: "ui", suite: "ui" });
 
 default_test!(RunPassValgrind {
     path: "src/test/run-pass-valgrind",
@@ -1867,12 +1856,12 @@ impl Step for RustcGuide {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CrateLibrustc {
     compiler: Compiler,
     target: TargetSelection,
     test_kind: TestKind,
-    krate: Interned<String>,
+    crates: Vec<Interned<String>>,
 }
 
 impl Step for CrateLibrustc {
@@ -1888,10 +1877,14 @@ impl Step for CrateLibrustc {
         let builder = run.builder;
         let host = run.build_triple();
         let compiler = builder.compiler_for(builder.top_stage, host, host);
-        let krate = builder.crate_paths[&run.path];
+        let crates = run
+            .paths
+            .iter()
+            .map(|p| builder.crate_paths[&p.assert_single_path().path].clone())
+            .collect();
         let test_kind = builder.kind.into();
 
-        builder.ensure(CrateLibrustc { compiler, target: run.target, test_kind, krate });
+        builder.ensure(CrateLibrustc { compiler, target: run.target, test_kind, crates });
     }
 
     fn run(self, builder: &Builder<'_>) {
@@ -1900,18 +1893,18 @@ impl Step for CrateLibrustc {
             target: self.target,
             mode: Mode::Rustc,
             test_kind: self.test_kind,
-            krate: self.krate,
+            crates: self.crates,
         });
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Crate {
     pub compiler: Compiler,
     pub target: TargetSelection,
     pub mode: Mode,
     pub test_kind: TestKind,
-    pub krate: Interned<String>,
+    pub crates: Vec<Interned<String>>,
 }
 
 impl Step for Crate {
@@ -1927,9 +1920,13 @@ impl Step for Crate {
         let host = run.build_triple();
         let compiler = builder.compiler_for(builder.top_stage, host, host);
         let test_kind = builder.kind.into();
-        let krate = builder.crate_paths[&run.path];
+        let crates = run
+            .paths
+            .iter()
+            .map(|p| builder.crate_paths[&p.assert_single_path().path].clone())
+            .collect();
 
-        builder.ensure(Crate { compiler, target: run.target, mode: Mode::Std, test_kind, krate });
+        builder.ensure(Crate { compiler, target: run.target, mode: Mode::Std, test_kind, crates });
     }
 
     /// Runs all unit tests plus documentation tests for a given crate defined
@@ -1945,7 +1942,6 @@ impl Step for Crate {
         let target = self.target;
         let mode = self.mode;
         let test_kind = self.test_kind;
-        let krate = self.krate;
 
         builder.ensure(compile::Std { compiler, target });
         builder.ensure(RemoteCopyLibs { compiler, target });
@@ -1986,7 +1982,9 @@ impl Step for Crate {
             DocTests::Yes => {}
         }
 
-        cargo.arg("-p").arg(krate);
+        for krate in &self.crates {
+            cargo.arg("-p").arg(krate);
+        }
 
         // The tests are going to run with the *target* libraries, so we need to
         // ensure that those libraries show up in the LD_LIBRARY_PATH equivalent.
@@ -2022,8 +2020,8 @@ impl Step for Crate {
         }
 
         builder.info(&format!(
-            "{} {} stage{} ({} -> {})",
-            test_kind, krate, compiler.stage, &compiler.host, target
+            "{} {:?} stage{} ({} -> {})",
+            test_kind, self.crates, compiler.stage, &compiler.host, target
         ));
         let _time = util::timeit(&builder);
         try_run(builder, &mut cargo.into());
@@ -2058,7 +2056,7 @@ impl Step for CrateRustdoc {
         let test_kind = self.test_kind;
         let target = self.host;
 
-        let compiler = if builder.config.download_rustc {
+        let compiler = if builder.download_rustc() {
             builder.compiler(builder.top_stage, target)
         } else {
             // Use the previous stage compiler to reuse the artifacts that are
@@ -2127,7 +2125,7 @@ impl Step for CrateRustdoc {
         // with.
         //
         // Note that this set the host libdir for `download_rustc`, which uses a normal rust distribution.
-        let libdir = if builder.config.download_rustc {
+        let libdir = if builder.download_rustc() {
             builder.rustc_libdir(compiler)
         } else {
             builder.sysroot_libdir(compiler, target).to_path_buf()

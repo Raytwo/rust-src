@@ -12,7 +12,7 @@ use rustc_index::bit_set::GrowableBitSet;
 use rustc_infer::infer::InferOk;
 use rustc_infer::infer::LateBoundRegionConversionTime::HigherRankedType;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, InternalSubsts, Subst, SubstsRef};
-use rustc_middle::ty::{self, EarlyBinder, GenericParamDefKind, Ty};
+use rustc_middle::ty::{self, EarlyBinder, GenericParamDefKind, Ty, TyCtxt};
 use rustc_middle::ty::{ToPolyTraitRef, ToPredicate};
 use rustc_span::def_id::DefId;
 
@@ -421,14 +421,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         let object_trait_ref = data.principal().unwrap_or_else(|| {
             span_bug!(obligation.cause.span, "object candidate with no principal")
         });
-        let object_trait_ref = self
-            .infcx
-            .replace_bound_vars_with_fresh_vars(
-                obligation.cause.span,
-                HigherRankedType,
-                object_trait_ref,
-            )
-            .0;
+        let object_trait_ref = self.infcx.replace_bound_vars_with_fresh_vars(
+            obligation.cause.span,
+            HigherRankedType,
+            object_trait_ref,
+        );
         let object_trait_ref = object_trait_ref.with_self_ty(self.tcx(), self_ty);
 
         let mut nested = vec![];
@@ -545,7 +542,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                 bound_vars.push(bound_var);
                                 tcx.mk_const(ty::ConstS {
                                     ty: tcx.type_of(param.def_id),
-                                    val: ty::ConstKind::Bound(
+                                    kind: ty::ConstKind::Bound(
                                         ty::INNERMOST,
                                         ty::BoundVar::from_usize(bound_vars.len() - 1),
                                     ),
@@ -834,7 +831,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             move |segment| {
                 match segment {
                     VtblSegment::MetadataDSA => {
-                        vptr_offset += ty::COMMON_VTABLE_ENTRIES.len();
+                        vptr_offset += TyCtxt::COMMON_VTABLE_ENTRIES.len();
                     }
                     VtblSegment::TraitOwnEntries { trait_ref, emit_vptr } => {
                         vptr_offset += util::count_own_vtable_entries(tcx, trait_ref);
@@ -992,7 +989,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     // Lifetimes aren't allowed to change during unsizing.
                     GenericArgKind::Lifetime(_) => None,
 
-                    GenericArgKind::Const(ct) => match ct.val() {
+                    GenericArgKind::Const(ct) => match ct.kind() {
                         ty::ConstKind::Param(p) => Some(p.index),
                         _ => None,
                     },

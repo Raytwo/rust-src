@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 
 use super::MATCH_SAME_ARMS;
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'_>]) {
     let hash = |&(_, arm): &(usize, &Arm<'_>)| -> u64 {
         let mut h = SpanlessHash::new(cx);
@@ -110,14 +110,9 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'_>]) {
                 arm1.span,
                 "this match arm has an identical body to the `_` wildcard arm",
                 |diag| {
-                    diag.span_suggestion(
-                        arm1.span,
-                        "try removing the arm",
-                        String::new(),
-                        Applicability::MaybeIncorrect,
-                    )
-                    .help("or try changing either arm body")
-                    .span_note(arm2.span, "`_` wildcard arm here");
+                    diag.span_suggestion(arm1.span, "try removing the arm", "", Applicability::MaybeIncorrect)
+                        .help("or try changing either arm body")
+                        .span_note(arm2.span, "`_` wildcard arm here");
                 },
             );
         } else {
@@ -225,9 +220,9 @@ fn iter_matching_struct_fields<'a>(
     Iter(left.iter(), right.iter())
 }
 
-#[allow(clippy::similar_names)]
+#[expect(clippy::similar_names)]
 impl<'a> NormalizedPat<'a> {
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn from_pat(cx: &LateContext<'_>, arena: &'a DroplessArena, pat: &'a Pat<'_>) -> Self {
         match pat.kind {
             PatKind::Wild | PatKind::Binding(.., None) => Self::Wild,

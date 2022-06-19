@@ -48,10 +48,11 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```ignore
-    /// // Bad
     /// fn foo(&Vec<u32>) { .. }
+    /// ```
     ///
-    /// // Good
+    /// Use instead:
+    /// ```ignore
     /// fn foo(&[u32]) { .. }
     /// ```
     #[clippy::version = "pre 1.29.0"]
@@ -70,15 +71,18 @@ declare_clippy_lint! {
     /// method instead
     ///
     /// ### Example
-    /// ```ignore
-    /// // Bad
-    /// if x == ptr::null {
-    ///     ..
-    /// }
+    /// ```rust,ignore
+    /// use std::ptr;
     ///
-    /// // Good
+    /// if x == ptr::null {
+    ///     // ..
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    /// ```rust,ignore
     /// if x.is_null() {
-    ///     ..
+    ///     // ..
     /// }
     /// ```
     #[clippy::version = "pre 1.29.0"]
@@ -129,12 +133,12 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```ignore
-    /// // Bad. Undefined behavior
+    /// // Undefined behavior
     /// unsafe { std::slice::from_raw_parts(ptr::null(), 0); }
     /// ```
     ///
+    /// Use instead:
     /// ```ignore
-    /// // Good
     /// unsafe { std::slice::from_raw_parts(NonNull::dangling().as_ptr(), 0); }
     /// ```
     #[clippy::version = "1.53.0"]
@@ -343,7 +347,7 @@ impl fmt::Display for RefPrefix {
         use fmt::Write;
         f.write_char('&')?;
         match self.lt {
-            LifetimeName::Param(ParamName::Plain(name)) => {
+            LifetimeName::Param(_, ParamName::Plain(name)) => {
                 name.fmt(f)?;
                 f.write_char(' ')?;
             },
@@ -395,9 +399,9 @@ impl<'tcx> DerefTy<'tcx> {
 
 fn check_fn_args<'cx, 'tcx: 'cx>(
     cx: &'cx LateContext<'tcx>,
-    tys: &'tcx [Ty<'_>],
-    hir_tys: &'tcx [hir::Ty<'_>],
-    params: &'tcx [Param<'_>],
+    tys: &'tcx [Ty<'tcx>],
+    hir_tys: &'tcx [hir::Ty<'tcx>],
+    params: &'tcx [Param<'tcx>],
 ) -> impl Iterator<Item = PtrArg<'tcx>> + 'cx {
     tys.iter()
         .zip(hir_tys.iter())
@@ -514,7 +518,7 @@ fn check_mut_from_ref<'tcx>(cx: &LateContext<'tcx>, sig: &FnSig<'_>, body: Optio
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn check_ptr_arg_usage<'tcx>(cx: &LateContext<'tcx>, body: &'tcx Body<'_>, args: &[PtrArg<'tcx>]) -> Vec<PtrArgResult> {
     struct V<'cx, 'tcx> {
         cx: &'cx LateContext<'tcx>,

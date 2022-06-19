@@ -44,7 +44,6 @@ struct MutVarsDelegate {
 }
 
 impl<'tcx> MutVarsDelegate {
-    #[allow(clippy::similar_names)]
     fn update(&mut self, cat: &PlaceWithHirId<'tcx>) {
         match cat.place.base {
             PlaceBase::Local(id) => {
@@ -186,7 +185,7 @@ pub fn local_used_after_expr(cx: &LateContext<'_>, local_id: HirId, after: &Expr
             matches!(
                 node,
                 Node::Expr(Expr {
-                    kind: ExprKind::Loop(..) | ExprKind::Closure(..),
+                    kind: ExprKind::Loop(..) | ExprKind::Closure { .. },
                     ..
                 })
             )

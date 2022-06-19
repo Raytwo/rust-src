@@ -64,7 +64,6 @@ impl<'a, 'tcx> SpanlessEq<'a, 'tcx> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn eq_block(&mut self, left: &Block<'_>, right: &Block<'_>) -> bool {
         self.inter_expr().eq_block(left, right)
     }
@@ -92,7 +91,7 @@ pub struct HirEqInterExpr<'a, 'b, 'tcx> {
     // When binding are declared, the binding ID in the left expression is mapped to the one on the
     // right. For example, when comparing `{ let x = 1; x + 2 }` and `{ let y = 1; y + 2 }`,
     // these blocks are considered equal since `x` is mapped to `y`.
-    locals: HirIdMap<HirId>,
+    pub locals: HirIdMap<HirId>,
 }
 
 impl HirEqInterExpr<'_, '_, '_> {
@@ -194,7 +193,7 @@ impl HirEqInterExpr<'_, '_, '_> {
         res
     }
 
-    #[allow(clippy::similar_names)]
+    #[expect(clippy::similar_names)]
     pub fn eq_expr(&mut self, left: &Expr<'_>, right: &Expr<'_>) -> bool {
         if !self.inner.allow_side_effects && left.span.ctxt() != right.span.ctxt() {
             return false;
@@ -361,7 +360,7 @@ impl HirEqInterExpr<'_, '_, '_> {
         }
     }
 
-    #[allow(clippy::similar_names)]
+    #[expect(clippy::similar_names)]
     fn eq_qpath(&mut self, left: &QPath<'_>, right: &QPath<'_>) -> bool {
         match (left, right) {
             (&QPath::Resolved(ref lty, lpath), &QPath::Resolved(ref rty, rpath)) => {
@@ -407,16 +406,15 @@ impl HirEqInterExpr<'_, '_, '_> {
         left.ident.name == right.ident.name && both(&left.args, &right.args, |l, r| self.eq_path_parameters(l, r))
     }
 
-    #[allow(clippy::similar_names)]
     pub fn eq_ty(&mut self, left: &Ty<'_>, right: &Ty<'_>) -> bool {
         match (&left.kind, &right.kind) {
             (&TyKind::Slice(l_vec), &TyKind::Slice(r_vec)) => self.eq_ty(l_vec, r_vec),
             (&TyKind::Array(lt, ll), &TyKind::Array(rt, rl)) => self.eq_ty(lt, rt) && self.eq_array_length(ll, rl),
             (&TyKind::Ptr(ref l_mut), &TyKind::Ptr(ref r_mut)) => {
-                l_mut.mutbl == r_mut.mutbl && self.eq_ty(&*l_mut.ty, &*r_mut.ty)
+                l_mut.mutbl == r_mut.mutbl && self.eq_ty(l_mut.ty, r_mut.ty)
             },
             (&TyKind::Rptr(_, ref l_rmut), &TyKind::Rptr(_, ref r_rmut)) => {
-                l_rmut.mutbl == r_rmut.mutbl && self.eq_ty(&*l_rmut.ty, &*r_rmut.ty)
+                l_rmut.mutbl == r_rmut.mutbl && self.eq_ty(l_rmut.ty, r_rmut.ty)
             },
             (&TyKind::Path(ref l), &TyKind::Path(ref r)) => self.eq_qpath(l, r),
             (&TyKind::Tup(l), &TyKind::Tup(r)) => over(l, r, |l, r| self.eq_ty(l, r)),
@@ -562,7 +560,7 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
         std::mem::discriminant(&b.rules).hash(&mut self.s);
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn hash_expr(&mut self, e: &Expr<'_>) {
         let simple_const = self
             .maybe_typeck_results
@@ -610,7 +608,7 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
                     self.hash_name(i.ident.name);
                 }
                 if let Some(j) = *j {
-                    self.hash_expr(&*j);
+                    self.hash_expr(j);
                 }
             },
             ExprKind::Box(e) | ExprKind::DropTemps(e) | ExprKind::Yield(e, _) => {
@@ -624,10 +622,12 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
                 self.hash_expr(e);
                 self.hash_ty(ty);
             },
-            ExprKind::Closure(cap, _, eid, _, _) => {
-                std::mem::discriminant(&cap).hash(&mut self.s);
+            ExprKind::Closure {
+                capture_clause, body, ..
+            } => {
+                std::mem::discriminant(&capture_clause).hash(&mut self.s);
                 // closures inherit TypeckResults
-                self.hash_expr(&self.cx.tcx.hir().body(eid).value);
+                self.hash_expr(&self.cx.tcx.hir().body(body).value);
             },
             ExprKind::Field(e, ref f) => {
                 self.hash_expr(e);
@@ -904,16 +904,14 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
 
     pub fn hash_lifetime(&mut self, lifetime: Lifetime) {
         std::mem::discriminant(&lifetime.name).hash(&mut self.s);
-        if let LifetimeName::Param(ref name) = lifetime.name {
+        if let LifetimeName::Param(param_id, ref name) = lifetime.name {
             std::mem::discriminant(name).hash(&mut self.s);
+            param_id.hash(&mut self.s);
             match name {
                 ParamName::Plain(ref ident) => {
                     ident.name.hash(&mut self.s);
                 },
-                ParamName::Fresh(ref size) => {
-                    size.hash(&mut self.s);
-                },
-                ParamName::Error => {},
+                ParamName::Fresh | ParamName::Error => {},
             }
         }
     }
@@ -999,4 +997,16 @@ impl<'a, 'tcx> SpanlessHash<'a, 'tcx> {
             }
         }
     }
+}
+
+pub fn hash_stmt(cx: &LateContext<'_>, s: &Stmt<'_>) -> u64 {
+    let mut h = SpanlessHash::new(cx);
+    h.hash_stmt(s);
+    h.finish()
+}
+
+pub fn hash_expr(cx: &LateContext<'_>, e: &Expr<'_>) -> u64 {
+    let mut h = SpanlessHash::new(cx);
+    h.hash_expr(e);
+    h.finish()
 }

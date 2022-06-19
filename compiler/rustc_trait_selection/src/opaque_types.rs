@@ -7,7 +7,7 @@ use rustc_hir::OpaqueTyOrigin;
 use rustc_infer::infer::error_reporting::unexpected_hidden_region_diagnostic;
 use rustc_infer::infer::{InferCtxt, TyCtxtInferExt as _};
 use rustc_infer::traits::{Obligation, ObligationCause, TraitEngine};
-use rustc_middle::ty::fold::{TypeFoldable, TypeFolder};
+use rustc_middle::ty::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, InternalSubsts};
 use rustc_middle::ty::{self, OpaqueHiddenType, OpaqueTypeKey, ToPredicate, Ty, TyCtxt};
 use rustc_span::Span;
@@ -209,7 +209,7 @@ fn check_opaque_type_parameter_valid(
             GenericArgKind::Lifetime(lt) => {
                 matches!(*lt, ty::ReEarlyBound(_) | ty::ReFree(_))
             }
-            GenericArgKind::Const(ct) => matches!(ct.val(), ty::ConstKind::Param(_)),
+            GenericArgKind::Const(ct) => matches!(ct.kind(), ty::ConstKind::Param(_)),
         };
 
         if arg_is_param {
@@ -452,7 +452,7 @@ impl<'tcx> TypeFolder<'tcx> for ReverseMapper<'tcx> {
     fn fold_const(&mut self, ct: ty::Const<'tcx>) -> ty::Const<'tcx> {
         trace!("checking const {:?}", ct);
         // Find a const parameter
-        match ct.val() {
+        match ct.kind() {
             ty::ConstKind::Param(..) => {
                 // Look it up in the substitution list.
                 match self.map.get(&ct.into()).map(|k| k.unpack()) {

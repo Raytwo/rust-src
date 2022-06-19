@@ -13,7 +13,8 @@ use rustc_lint::LateContext;
 use rustc_middle::mir::interpret::{ConstValue, Scalar};
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, Subst};
 use rustc_middle::ty::{
-    self, AdtDef, Binder, FnSig, IntTy, Predicate, PredicateKind, Ty, TyCtxt, TypeFoldable, UintTy, VariantDiscr,
+    self, AdtDef, Binder, FnSig, IntTy, ParamEnv, Predicate, PredicateKind, Ty, TyCtxt, TypeFoldable, UintTy,
+    VariantDiscr,
 };
 use rustc_span::symbol::Ident;
 use rustc_span::{sym, Span, Symbol, DUMMY_SP};
@@ -42,7 +43,7 @@ pub fn can_partially_move_ty<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool
 }
 
 /// Walks into `ty` and returns `true` if any inner type is the same as `other_ty`
-pub fn contains_ty(ty: Ty<'_>, other_ty: Ty<'_>) -> bool {
+pub fn contains_ty<'tcx>(ty: Ty<'tcx>, other_ty: Ty<'tcx>) -> bool {
     ty.walk().any(|inner| match inner.unpack() {
         GenericArgKind::Type(inner_ty) => other_ty == inner_ty,
         GenericArgKind::Lifetime(_) | GenericArgKind::Const(_) => false,
@@ -51,7 +52,7 @@ pub fn contains_ty(ty: Ty<'_>, other_ty: Ty<'_>) -> bool {
 
 /// Walks into `ty` and returns `true` if any inner type is an instance of the given adt
 /// constructor.
-pub fn contains_adt_constructor(ty: Ty<'_>, adt: AdtDef<'_>) -> bool {
+pub fn contains_adt_constructor<'tcx>(ty: Ty<'tcx>, adt: AdtDef<'tcx>) -> bool {
     ty.walk().any(|inner| match inner.unpack() {
         GenericArgKind::Type(inner_ty) => inner_ty.ty_adt_def() == Some(adt),
         GenericArgKind::Lifetime(_) | GenericArgKind::Const(_) => false,
@@ -77,9 +78,9 @@ pub fn get_associated_type<'tcx>(
     cx.tcx
         .associated_items(trait_id)
         .find_by_name_and_kind(cx.tcx, Ident::from_str(name), ty::AssocKind::Type, trait_id)
-        .map(|assoc| {
+        .and_then(|assoc| {
             let proj = cx.tcx.mk_projection(assoc.def_id, cx.tcx.mk_substs_trait(ty, &[]));
-            cx.tcx.normalize_erasing_regions(cx.param_env, proj)
+            cx.tcx.try_normalize_erasing_regions(cx.param_env, proj).ok()
         })
 }
 
@@ -152,17 +153,28 @@ pub fn implements_trait<'tcx>(
     trait_id: DefId,
     ty_params: &[GenericArg<'tcx>],
 ) -> bool {
+    implements_trait_with_env(cx.tcx, cx.param_env, ty, trait_id, ty_params)
+}
+
+/// Same as `implements_trait` but allows using a `ParamEnv` different from the lint context.
+pub fn implements_trait_with_env<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    param_env: ParamEnv<'tcx>,
+    ty: Ty<'tcx>,
+    trait_id: DefId,
+    ty_params: &[GenericArg<'tcx>],
+) -> bool {
     // Clippy shouldn't have infer types
     assert!(!ty.needs_infer());
 
-    let ty = cx.tcx.erase_regions(ty);
+    let ty = tcx.erase_regions(ty);
     if ty.has_escaping_bound_vars() {
         return false;
     }
-    let ty_params = cx.tcx.mk_substs(ty_params.iter());
-    cx.tcx.infer_ctxt().enter(|infcx| {
+    let ty_params = tcx.mk_substs(ty_params.iter());
+    tcx.infer_ctxt().enter(|infcx| {
         infcx
-            .type_implements_trait(trait_id, ty, ty_params, cx.param_env)
+            .type_implements_trait(trait_id, ty, ty_params, param_env)
             .must_apply_modulo_regions()
     })
 }
@@ -603,7 +615,7 @@ impl core::ops::Add<u32> for EnumValue {
 }
 
 /// Attempts to read the given constant as though it were an an enum value.
-#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+#[expect(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 pub fn read_explicit_enum_value(tcx: TyCtxt<'_>, id: DefId) -> Option<EnumValue> {
     if let Ok(ConstValue::Scalar(Scalar::Int(value))) = tcx.const_eval_poly(id) {
         match tcx.type_of(id).kind() {

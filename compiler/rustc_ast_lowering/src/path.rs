@@ -1,5 +1,6 @@
 use crate::ImplTraitPosition;
 
+use super::ResolverAstLoweringExt;
 use super::{GenericArgsCtor, LifetimeRes, ParenthesizedGenericArgs};
 use super::{ImplTraitContext, LoweringContext, ParamMode};
 
@@ -15,17 +16,17 @@ use smallvec::smallvec;
 use tracing::debug;
 
 impl<'a, 'hir> LoweringContext<'a, 'hir> {
+    #[instrument(level = "trace", skip(self))]
     pub(crate) fn lower_qpath(
         &mut self,
         id: NodeId,
         qself: &Option<QSelf>,
         p: &Path,
         param_mode: ParamMode,
-        mut itctx: ImplTraitContext<'_, 'hir>,
+        itctx: ImplTraitContext,
     ) -> hir::QPath<'hir> {
-        debug!("lower_qpath(id: {:?}, qself: {:?}, p: {:?})", id, qself, p);
         let qself_position = qself.as_ref().map(|q| q.position);
-        let qself = qself.as_ref().map(|q| self.lower_ty(&q.ty, itctx.reborrow()));
+        let qself = qself.as_ref().map(|q| self.lower_ty(&q.ty, itctx));
 
         let partial_res =
             self.resolver.get_partial_res(id).unwrap_or_else(|| PartialRes::new(Res::Err));
@@ -70,7 +71,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         segment,
                         param_mode,
                         parenthesized_generic_args,
-                        itctx.reborrow(),
+                        itctx,
                     )
                 },
             )),
@@ -116,7 +117,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 segment,
                 param_mode,
                 ParenthesizedGenericArgs::Err,
-                itctx.reborrow(),
+                itctx,
             ));
             let qpath = hir::QPath::TypeRelative(ty, hir_segment);
 
@@ -180,7 +181,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         segment: &PathSegment,
         param_mode: ParamMode,
         parenthesized_generic_args: ParenthesizedGenericArgs,
-        itctx: ImplTraitContext<'_, 'hir>,
+        itctx: ImplTraitContext,
     ) -> hir::PathSegment<'hir> {
         debug!("path_span: {:?}, lower_path_segment(segment: {:?})", path_span, segment,);
         let (mut generic_args, infer_args) = if let Some(ref generic_args) = segment.args {
@@ -196,25 +197,32 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     ParenthesizedGenericArgs::Err => {
                         let mut err = struct_span_err!(self.sess, data.span, E0214, "{}", msg);
                         err.span_label(data.span, "only `Fn` traits may use parentheses");
-                        if let Ok(snippet) = self.sess.source_map().span_to_snippet(data.span) {
-                            // Do not suggest going from `Trait()` to `Trait<>`
-                            if !data.inputs.is_empty() {
-                                // Suggest replacing `(` and `)` with `<` and `>`
-                                // The snippet may be missing the closing `)`, skip that case
-                                if snippet.ends_with(')') {
-                                    if let Some(split) = snippet.find('(') {
-                                        let trait_name = &snippet[0..split];
-                                        let args = &snippet[split + 1..snippet.len() - 1];
-                                        err.span_suggestion(
-                                            data.span,
-                                            "use angle brackets instead",
-                                            format!("{}<{}>", trait_name, args),
-                                            Applicability::MaybeIncorrect,
-                                        );
-                                    }
-                                }
-                            }
-                        };
+                        // Suggest replacing parentheses with angle brackets `Trait(params...)` to `Trait<params...>`
+                        if !data.inputs.is_empty() {
+                            // Start of the span to the 1st character of 1st argument
+                            let open_param = data.inputs_span.shrink_to_lo().to(data
+                                .inputs
+                                .first()
+                                .unwrap()
+                                .span
+                                .shrink_to_lo());
+                            // Last character position of last argument to the end of the span
+                            let close_param = data
+                                .inputs
+                                .last()
+                                .unwrap()
+                                .span
+                                .shrink_to_hi()
+                                .to(data.inputs_span.shrink_to_hi());
+                            err.multipart_suggestion(
+                                &format!("use angle brackets instead",),
+                                vec![
+                                    (open_param, String::from("<")),
+                                    (close_param, String::from(">")),
+                                ],
+                                Applicability::MaybeIncorrect,
+                            );
+                        }
                         err.emit();
                         (
                             self.lower_angle_bracketed_parameter_data(
@@ -318,7 +326,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         &mut self,
         data: &AngleBracketedArgs,
         param_mode: ParamMode,
-        mut itctx: ImplTraitContext<'_, 'hir>,
+        itctx: ImplTraitContext,
     ) -> (GenericArgsCtor<'hir>, bool) {
         let has_non_lt_args = data.args.iter().any(|arg| match arg {
             AngleBracketedArg::Arg(ast::GenericArg::Lifetime(_))
@@ -329,14 +337,12 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             .args
             .iter()
             .filter_map(|arg| match arg {
-                AngleBracketedArg::Arg(arg) => Some(self.lower_generic_arg(arg, itctx.reborrow())),
+                AngleBracketedArg::Arg(arg) => Some(self.lower_generic_arg(arg, itctx)),
                 AngleBracketedArg::Constraint(_) => None,
             })
             .collect();
         let bindings = self.arena.alloc_from_iter(data.args.iter().filter_map(|arg| match arg {
-            AngleBracketedArg::Constraint(c) => {
-                Some(self.lower_assoc_ty_constraint(c, itctx.reborrow()))
-            }
+            AngleBracketedArg::Constraint(c) => Some(self.lower_assoc_ty_constraint(c, itctx)),
             AngleBracketedArg::Arg(_) => None,
         }));
         let ctor = GenericArgsCtor { args, bindings, parenthesized: false, span: data.span };

@@ -67,6 +67,7 @@ impl<'tcx> MirPass<'tcx> for ConstProp {
         true
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // will be evaluated by miri and produce its errors there
         if body.source.promoted.is_some() {
@@ -200,7 +201,8 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for ConstPropMachine<'mir, 'tcx>
         _instance: ty::Instance<'tcx>,
         _abi: Abi,
         _args: &[OpTy<'tcx>],
-        _ret: Option<(&PlaceTy<'tcx>, BasicBlock)>,
+        _destination: &PlaceTy<'tcx>,
+        _target: Option<BasicBlock>,
         _unwind: StackPopUnwind,
     ) -> InterpResult<'tcx, Option<(&'mir Body<'tcx>, ty::Instance<'tcx>)>> {
         Ok(None)
@@ -210,7 +212,8 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for ConstPropMachine<'mir, 'tcx>
         _ecx: &mut InterpCx<'mir, 'tcx, Self>,
         _instance: ty::Instance<'tcx>,
         _args: &[OpTy<'tcx>],
-        _ret: Option<(&PlaceTy<'tcx>, BasicBlock)>,
+        _destination: &PlaceTy<'tcx>,
+        _target: Option<BasicBlock>,
         _unwind: StackPopUnwind,
     ) -> InterpResult<'tcx> {
         throw_machine_stop_str!("calling intrinsics isn't supported in ConstProp")
@@ -384,24 +387,22 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             ConstPropMachine::new(only_propagate_inside_block_locals, can_const_prop),
         );
 
-        let ret = ecx
+        let ret_layout = ecx
             .layout_of(EarlyBinder(body.return_ty()).subst(tcx, substs))
             .ok()
-            // Don't bother allocating memory for ZST types which have no values
-            // or for large values.
-            .filter(|ret_layout| {
-                !ret_layout.is_zst() && ret_layout.size < Size::from_bytes(MAX_ALLOC_LIMIT)
-            })
-            .map(|ret_layout| {
-                ecx.allocate(ret_layout, MemoryKind::Stack)
-                    .expect("couldn't perform small allocation")
-                    .into()
-            });
+            // Don't bother allocating memory for large values.
+            .filter(|ret_layout| ret_layout.size < Size::from_bytes(MAX_ALLOC_LIMIT))
+            .unwrap_or_else(|| ecx.layout_of(tcx.types.unit).unwrap());
+
+        let ret = ecx
+            .allocate(ret_layout, MemoryKind::Stack)
+            .expect("couldn't perform small allocation")
+            .into();
 
         ecx.push_stack_frame(
             Instance::new(def_id, substs),
             dummy_body,
-            ret.as_ref(),
+            &ret,
             StackPopCleanup::Root { cleanup: false },
         )
         .expect("failed to push initial stack frame");
@@ -687,7 +688,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         Operand::Constant(Box::new(Constant {
             span,
             user_ty: None,
-            literal: ty::Const::from_scalar(self.tcx, scalar, ty).into(),
+            literal: ConstantKind::from_scalar(self.tcx, scalar, ty),
         }))
     }
 
@@ -699,7 +700,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     ) {
         if let Rvalue::Use(Operand::Constant(c)) = rval {
             match c.literal {
-                ConstantKind::Ty(c) if matches!(c.val(), ConstKind::Unevaluated(..)) => {}
+                ConstantKind::Ty(c) if matches!(c.kind(), ConstKind::Unevaluated(..)) => {}
                 _ => {
                     trace!("skipping replace of Rvalue::Use({:?} because it is already a const", c);
                     return;
@@ -765,20 +766,12 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                             if let Some(Some(alloc)) = alloc {
                                 // Assign entire constant in a single statement.
                                 // We can't use aggregates, as we run after the aggregate-lowering `MirPhase`.
+                                let const_val = ConstValue::ByRef { alloc, offset: Size::ZERO };
+                                let literal = ConstantKind::Val(const_val, ty);
                                 *rval = Rvalue::Use(Operand::Constant(Box::new(Constant {
                                     span: source_info.span,
                                     user_ty: None,
-                                    literal: self
-                                        .ecx
-                                        .tcx
-                                        .mk_const(ty::ConstS {
-                                            ty,
-                                            val: ty::ConstKind::Value(ConstValue::ByRef {
-                                                alloc,
-                                                offset: Size::ZERO,
-                                            }),
-                                        })
-                                        .into(),
+                                    literal,
                                 })));
                             }
                         }

@@ -1,22 +1,17 @@
 use crate::ich;
 use rustc_ast as ast;
-use rustc_data_structures::fx::FxHashSet;
 use rustc_data_structures::sorted_map::SortedMap;
 use rustc_data_structures::stable_hasher::{HashStable, HashingControls, StableHasher};
 use rustc_data_structures::sync::Lrc;
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::definitions::{DefPathHash, Definitions};
+use rustc_index::vec::IndexVec;
 use rustc_session::cstore::CrateStore;
 use rustc_session::Session;
 use rustc_span::source_map::SourceMap;
 use rustc_span::symbol::Symbol;
 use rustc_span::{BytePos, CachingSourceMapView, SourceFile, Span, SpanData};
-
-fn compute_ignored_attr_names() -> FxHashSet<Symbol> {
-    debug_assert!(!ich::IGNORED_ATTRIBUTES.is_empty());
-    ich::IGNORED_ATTRIBUTES.iter().copied().collect()
-}
 
 /// This is the context state available during incr. comp. hashing. It contains
 /// enough information to transform `DefId`s and `HirId`s into stable `DefPath`s (i.e.,
@@ -26,6 +21,7 @@ fn compute_ignored_attr_names() -> FxHashSet<Symbol> {
 pub struct StableHashingContext<'a> {
     definitions: &'a Definitions,
     cstore: &'a dyn CrateStore,
+    source_span: &'a IndexVec<LocalDefId, Span>,
     // The value of `-Z incremental-ignore-spans`.
     // This field should only be used by `debug_opts_incremental_ignore_span`
     incremental_ignore_spans: bool,
@@ -56,6 +52,7 @@ impl<'a> StableHashingContext<'a> {
         sess: &'a Session,
         definitions: &'a Definitions,
         cstore: &'a dyn CrateStore,
+        source_span: &'a IndexVec<LocalDefId, Span>,
         always_ignore_spans: bool,
     ) -> Self {
         let hash_spans_initial =
@@ -65,6 +62,7 @@ impl<'a> StableHashingContext<'a> {
             body_resolver: BodyResolver::Forbidden,
             definitions,
             cstore,
+            source_span,
             incremental_ignore_spans: sess.opts.debugging_opts.incremental_ignore_spans,
             caching_source_map: None,
             raw_source_map: sess.source_map(),
@@ -77,11 +75,13 @@ impl<'a> StableHashingContext<'a> {
         sess: &'a Session,
         definitions: &'a Definitions,
         cstore: &'a dyn CrateStore,
+        source_span: &'a IndexVec<LocalDefId, Span>,
     ) -> Self {
         Self::new_with_or_without_spans(
             sess,
             definitions,
             cstore,
+            source_span,
             /*always_ignore_spans=*/ false,
         )
     }
@@ -91,9 +91,10 @@ impl<'a> StableHashingContext<'a> {
         sess: &'a Session,
         definitions: &'a Definitions,
         cstore: &'a dyn CrateStore,
+        source_span: &'a IndexVec<LocalDefId, Span>,
     ) -> Self {
         let always_ignore_spans = true;
-        Self::new_with_or_without_spans(sess, definitions, cstore, always_ignore_spans)
+        Self::new_with_or_without_spans(sess, definitions, cstore, source_span, always_ignore_spans)
     }
 
     /// Allow hashing
@@ -161,10 +162,7 @@ impl<'a> StableHashingContext<'a> {
 
     #[inline]
     pub fn is_ignored_attr(&self, name: Symbol) -> bool {
-        thread_local! {
-            static IGNORED_ATTRIBUTES: FxHashSet<Symbol> = compute_ignored_attr_names();
-        }
-        IGNORED_ATTRIBUTES.with(|attrs| attrs.contains(&name))
+        ich::IGNORED_ATTRIBUTES.contains(&name)
     }
 
     #[inline]
@@ -198,7 +196,7 @@ impl<'a> rustc_span::HashStableContext for StableHashingContext<'a> {
 
     #[inline]
     fn def_span(&self, def_id: LocalDefId) -> Span {
-        self.definitions.def_span(def_id)
+        self.source_span[def_id]
     }
 
     #[inline]

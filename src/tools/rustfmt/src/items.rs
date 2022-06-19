@@ -1361,7 +1361,7 @@ pub(crate) fn format_struct_struct(
 
 fn get_bytepos_after_visibility(vis: &ast::Visibility, default_span: Span) -> BytePos {
     match vis.kind {
-        ast::VisibilityKind::Crate(..) | ast::VisibilityKind::Restricted { .. } => vis.span.hi(),
+        ast::VisibilityKind::Restricted { .. } => vis.span.hi(),
         _ => default_span.lo(),
     }
 }
@@ -1770,7 +1770,7 @@ pub(crate) fn rewrite_struct_field(
         .offset_left(overhead + spacing.len())
         .and_then(|ty_shape| field.ty.rewrite(context, ty_shape));
     if let Some(ref ty) = orig_ty {
-        if !ty.contains('\n') {
+        if !ty.contains('\n') && !contains_comment(context.snippet(missing_span)) {
             return Some(attr_prefix + &spacing + ty);
         }
     }

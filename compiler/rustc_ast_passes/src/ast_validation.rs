@@ -420,7 +420,15 @@ impl<'a> AstValidator<'a> {
             .iter()
             .flat_map(|i| i.attrs.as_ref())
             .filter(|attr| {
-                let arr = [sym::allow, sym::cfg, sym::cfg_attr, sym::deny, sym::forbid, sym::warn];
+                let arr = [
+                    sym::allow,
+                    sym::cfg,
+                    sym::cfg_attr,
+                    sym::deny,
+                    sym::expect,
+                    sym::forbid,
+                    sym::warn,
+                ];
                 !arr.contains(&attr.name_or_empty()) && rustc_attr::is_builtin_attr(attr)
             })
             .for_each(|attr| {
@@ -435,7 +443,7 @@ impl<'a> AstValidator<'a> {
                 } else {
                     self.err_handler().span_err(
                         attr.span,
-                        "allow, cfg, cfg_attr, deny, \
+                        "allow, cfg, cfg_attr, deny, expect, \
                 forbid, and warn are the only allowed built-in attributes in function parameters",
                     );
                 }
@@ -480,7 +488,7 @@ impl<'a> AstValidator<'a> {
             .span_suggestion(
                 replace_span,
                 &format!("provide a definition for the {}", ctx),
-                sugg.to_string(),
+                sugg,
                 Applicability::HasPlaceholders,
             )
             .emit();
@@ -514,7 +522,7 @@ impl<'a> AstValidator<'a> {
                 .span_suggestion(
                     span,
                     &format!("remove the {}", remove_descr),
-                    String::new(),
+                    "",
                     Applicability::MaybeIncorrect,
                 )
                 .span_label(self.current_extern_span(), "`extern` block begins here")
@@ -562,7 +570,7 @@ impl<'a> AstValidator<'a> {
             .span_suggestion(
                 body.span,
                 "remove the invalid body",
-                ";".to_string(),
+                ";",
                 Applicability::MaybeIncorrect,
             )
             .help(
@@ -591,7 +599,7 @@ impl<'a> AstValidator<'a> {
                 .span_suggestion_verbose(
                     span.until(ident.span.shrink_to_lo()),
                     "remove the qualifiers",
-                    "fn ".to_string(),
+                    "fn ",
                     Applicability::MaybeIncorrect,
                 )
                 .emit();
@@ -695,7 +703,7 @@ impl<'a> AstValidator<'a> {
             .span_suggestion(
                 generics.span,
                 "remove the parameters",
-                String::new(),
+                "",
                 Applicability::MachineApplicable,
             )
             .emit();
@@ -713,7 +721,7 @@ impl<'a> AstValidator<'a> {
         .span_suggestion(
             span,
             "remove the super traits or lifetime bounds",
-            String::new(),
+            "",
             Applicability::MachineApplicable,
         )
         .emit();
@@ -745,7 +753,7 @@ impl<'a> AstValidator<'a> {
             .span_suggestion(
                 total_span,
                 "remove these associated items",
-                String::new(),
+                "",
                 Applicability::MachineApplicable,
             )
             .span_label(ident_span, "auto trait cannot have associated items")
@@ -985,7 +993,7 @@ fn validate_generic_param_order(
             err.span_suggestion(
                 span,
                 "reorder the parameters: lifetimes, then consts and types",
-                ordered_params.clone(),
+                &ordered_params,
                 Applicability::MachineApplicable,
             );
             err.emit();
@@ -1463,10 +1471,9 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
         if let GenericBound::Trait(ref poly, modify) = *bound {
             match (ctxt, modify) {
                 (BoundKind::SuperTraits, TraitBoundModifier::Maybe) => {
-                    let mut err = self.err_handler().struct_span_err(
-                        poly.span,
-                        &format!("`?Trait` is not permitted in supertraits"),
-                    );
+                    let mut err = self
+                        .err_handler()
+                        .struct_span_err(poly.span, "`?Trait` is not permitted in supertraits");
                     let path_str = pprust::path_to_string(&poly.trait_ref.path);
                     err.note(&format!("traits are `?{}` by default", path_str));
                     err.emit();
@@ -1474,7 +1481,7 @@ impl<'a> Visitor<'a> for AstValidator<'a> {
                 (BoundKind::TraitObject, TraitBoundModifier::Maybe) => {
                     let mut err = self.err_handler().struct_span_err(
                         poly.span,
-                        &format!("`?Trait` is not permitted in trait object types"),
+                        "`?Trait` is not permitted in trait object types",
                     );
                     err.emit();
                 }

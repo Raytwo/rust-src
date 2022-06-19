@@ -39,7 +39,7 @@ use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::util::Discr;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, AdtKind, Const, DefIdTree, Ty, TyCtxt};
+use rustc_middle::ty::{self, AdtKind, Const, DefIdTree, IsSuggestable, Ty, TyCtxt};
 use rustc_middle::ty::{ReprOptions, ToPredicate};
 use rustc_session::lint;
 use rustc_session::parse::feature_err;
@@ -295,7 +295,7 @@ impl<'tcx> Visitor<'tcx> for CollectItemTypesVisitor<'tcx> {
     }
 
     fn visit_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) {
-        if let hir::ExprKind::Closure(..) = expr.kind {
+        if let hir::ExprKind::Closure { .. } = expr.kind {
             let def_id = self.tcx.hir().local_def_id(expr.hir_id);
             self.tcx.ensure().generics_of(def_id);
             // We do not call `type_of` for closures here as that
@@ -449,8 +449,9 @@ impl<'tcx> AstConv<'tcx> for ItemCtxt<'tcx> {
                                     format!(
                                         "{}::",
                                         // Replace the existing lifetimes with a new named lifetime.
-                                        self.tcx
-                                            .replace_late_bound_regions(poly_trait_ref, |_| {
+                                        self.tcx.replace_late_bound_regions_uncached(
+                                            poly_trait_ref,
+                                            |_| {
                                                 self.tcx.mk_region(ty::ReEarlyBound(
                                                     ty::EarlyBoundRegion {
                                                         def_id: item_def_id,
@@ -458,8 +459,8 @@ impl<'tcx> AstConv<'tcx> for ItemCtxt<'tcx> {
                                                         name: Symbol::intern(&lt_name),
                                                     },
                                                 ))
-                                            })
-                                            .0,
+                                            }
+                                        ),
                                     ),
                                 ),
                             ];
@@ -805,8 +806,7 @@ fn convert_item(tcx: TyCtxt<'_>, item_id: hir::ItemId) {
                 hir::ItemKind::Fn(..) => tcx.ensure().fn_sig(def_id),
                 hir::ItemKind::OpaqueTy(..) => tcx.ensure().item_bounds(def_id),
                 hir::ItemKind::Const(ty, ..) | hir::ItemKind::Static(ty, ..) => {
-                    // (#75889): Account for `const C: dyn Fn() -> _ = "";`
-                    if let hir::TyKind::TraitObject(..) = ty.kind {
+                    if !is_suggestable_infer_ty(ty) {
                         let mut visitor = HirPlaceholderCollector::default();
                         visitor.visit_item(it);
                         placeholder_type_error(tcx, None, visitor.0, false, None, it.kind.descr());
@@ -1364,7 +1364,6 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
 
     fn has_late_bound_regions<'tcx>(
         tcx: TyCtxt<'tcx>,
-        def_id: LocalDefId,
         generics: &'tcx hir::Generics<'tcx>,
         decl: &'tcx hir::FnDecl<'tcx>,
     ) -> Option<Span> {
@@ -1373,14 +1372,9 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
             outer_index: ty::INNERMOST,
             has_late_bound_regions: None,
         };
-        let late_bound_map = tcx.is_late_bound_map(def_id);
-        let is_late_bound = |id| {
-            let id = tcx.hir().local_def_id(id);
-            late_bound_map.map_or(false, |(_, set)| set.contains(&id))
-        };
         for param in generics.params {
             if let GenericParamKind::Lifetime { .. } = param.kind {
-                if is_late_bound(param.hir_id) {
+                if tcx.is_late_bound(param.hir_id) {
                     return Some(param.span);
                 }
             }
@@ -1392,25 +1386,25 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
     match node {
         Node::TraitItem(item) => match item.kind {
             hir::TraitItemKind::Fn(ref sig, _) => {
-                has_late_bound_regions(tcx, item.def_id, &item.generics, sig.decl)
+                has_late_bound_regions(tcx, &item.generics, sig.decl)
             }
             _ => None,
         },
         Node::ImplItem(item) => match item.kind {
             hir::ImplItemKind::Fn(ref sig, _) => {
-                has_late_bound_regions(tcx, item.def_id, &item.generics, sig.decl)
+                has_late_bound_regions(tcx, &item.generics, sig.decl)
             }
             _ => None,
         },
         Node::ForeignItem(item) => match item.kind {
             hir::ForeignItemKind::Fn(fn_decl, _, ref generics) => {
-                has_late_bound_regions(tcx, item.def_id, generics, fn_decl)
+                has_late_bound_regions(tcx, generics, fn_decl)
             }
             _ => None,
         },
         Node::Item(item) => match item.kind {
             hir::ItemKind::Fn(ref sig, .., ref generics, _) => {
-                has_late_bound_regions(tcx, item.def_id, generics, sig.decl)
+                has_late_bound_regions(tcx, generics, sig.decl)
             }
             _ => None,
         },
@@ -1572,7 +1566,7 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
                 }
             }
         }
-        Node::Expr(&hir::Expr { kind: hir::ExprKind::Closure(..), .. }) => {
+        Node::Expr(&hir::Expr { kind: hir::ExprKind::Closure { .. }, .. }) => {
             Some(tcx.typeck_root_def_id(def_id))
         }
         Node::Item(item) => match item.kind {
@@ -1594,41 +1588,20 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
         _ => None,
     };
 
-    let mut opt_self = None;
-    let mut allow_defaults = false;
-
     let no_generics = hir::Generics::empty();
-    let ast_generics = match node {
-        Node::TraitItem(item) => &item.generics,
-
-        Node::ImplItem(item) => &item.generics,
-
+    let ast_generics = node.generics().unwrap_or(&no_generics);
+    let (opt_self, allow_defaults) = match node {
         Node::Item(item) => {
             match item.kind {
-                ItemKind::Fn(.., ref generics, _)
-                | ItemKind::Impl(hir::Impl { ref generics, .. }) => generics,
-
-                ItemKind::TyAlias(_, ref generics)
-                | ItemKind::Enum(_, ref generics)
-                | ItemKind::Struct(_, ref generics)
-                | ItemKind::OpaqueTy(hir::OpaqueTy { ref generics, .. })
-                | ItemKind::Union(_, ref generics) => {
-                    allow_defaults = true;
-                    generics
-                }
-
-                ItemKind::Trait(_, _, ref generics, ..)
-                | ItemKind::TraitAlias(ref generics, ..) => {
+                ItemKind::Trait(..) | ItemKind::TraitAlias(..) => {
                     // Add in the self type parameter.
                     //
                     // Something of a hack: use the node id for the trait, also as
                     // the node id for the Self type parameter.
-                    let param_id = item.def_id;
-
-                    opt_self = Some(ty::GenericParamDef {
+                    let opt_self = Some(ty::GenericParamDef {
                         index: 0,
                         name: kw::SelfUpper,
-                        def_id: param_id.to_def_id(),
+                        def_id,
                         pure_wrt_drop: false,
                         kind: ty::GenericParamDefKind::Type {
                             has_default: false,
@@ -1637,21 +1610,17 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
                         },
                     });
 
-                    allow_defaults = true;
-                    generics
+                    (opt_self, true)
                 }
-
-                _ => &no_generics,
+                ItemKind::TyAlias(..)
+                | ItemKind::Enum(..)
+                | ItemKind::Struct(..)
+                | ItemKind::OpaqueTy(..)
+                | ItemKind::Union(..) => (None, true),
+                _ => (None, false),
             }
         }
-
-        Node::ForeignItem(item) => match item.kind {
-            ForeignItemKind::Static(..) => &no_generics,
-            ForeignItemKind::Fn(_, _, ref generics) => generics,
-            ForeignItemKind::Type => &no_generics,
-        },
-
-        _ => &no_generics,
+        _ => (None, false),
     };
 
     let has_self = opt_self.is_some();
@@ -1671,7 +1640,7 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
         params.push(opt_self);
     }
 
-    let early_lifetimes = early_bound_lifetimes_from_generics(tcx, hir_id.owner, ast_generics);
+    let early_lifetimes = early_bound_lifetimes_from_generics(tcx, ast_generics);
     params.extend(early_lifetimes.enumerate().map(|(i, param)| ty::GenericParamDef {
         name: param.name.ident().name,
         index: own_start + i as u32,
@@ -1748,7 +1717,9 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
     // provide junk type parameter defs - the only place that
     // cares about anything but the length is instantiation,
     // and we don't do that for closures.
-    if let Node::Expr(&hir::Expr { kind: hir::ExprKind::Closure(.., gen), .. }) = node {
+    if let Node::Expr(&hir::Expr { kind: hir::ExprKind::Closure { movability: gen, .. }, .. }) =
+        node
+    {
         let dummy_args = if gen.is_some() {
             &["<resume_ty>", "<yield_ty>", "<return_ty>", "<witness>", "<upvars>"][..]
         } else {
@@ -1911,7 +1882,7 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
             ))
         }
 
-        Expr(&hir::Expr { kind: hir::ExprKind::Closure(..), .. }) => {
+        Expr(&hir::Expr { kind: hir::ExprKind::Closure { .. }, .. }) => {
             // Closure signatures are not like other function
             // signatures and cannot be accessed through `fn_sig`. For
             // example, a closure signature excludes the `self`
@@ -1960,7 +1931,7 @@ fn infer_return_ty_for_fn_sig<'tcx>(
                 diag.span_suggestion(
                     ty.span,
                     "replace with the correct return type",
-                    ret_ty.to_string(),
+                    ret_ty,
                     Applicability::MachineApplicable,
                 );
             } else if matches!(ret_ty.kind(), ty::FnDef(..)) {
@@ -1969,7 +1940,7 @@ fn infer_return_ty_for_fn_sig<'tcx>(
                     diag.span_suggestion(
                         ty.span,
                         "replace with the correct return type",
-                        fn_sig.to_string(),
+                        fn_sig,
                         Applicability::MachineApplicable,
                     );
                 }
@@ -2054,23 +2025,10 @@ fn impl_polarity(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ImplPolarity {
 /// `resolve_lifetime::early_bound_lifetimes`.
 fn early_bound_lifetimes_from_generics<'a, 'tcx: 'a>(
     tcx: TyCtxt<'tcx>,
-    def_id: LocalDefId,
     generics: &'a hir::Generics<'a>,
 ) -> impl Iterator<Item = &'a hir::GenericParam<'a>> + Captures<'tcx> {
-    let late_bound_map = if generics.params.is_empty() {
-        // This function may be called on `def_id == CRATE_DEF_ID`,
-        // which makes `is_late_bound_map` ICE.  Don't even try if there
-        // is no generic parameter.
-        None
-    } else {
-        tcx.is_late_bound_map(def_id)
-    };
-    let is_late_bound = move |hir_id| {
-        let id = tcx.hir().local_def_id(hir_id);
-        late_bound_map.map_or(false, |(_, set)| set.contains(&id))
-    };
     generics.params.iter().filter(move |param| match param.kind {
-        GenericParamKind::Lifetime { .. } => !is_late_bound(param.hir_id),
+        GenericParamKind::Lifetime { .. } => !tcx.is_late_bound(param.hir_id),
         _ => false,
     })
 }
@@ -2255,7 +2213,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
     // have to be careful to only iterate over early-bound regions.
     let mut index = parent_count
         + has_own_self as u32
-        + early_bound_lifetimes_from_generics(tcx, hir_id.owner, ast_generics).count() as u32;
+        + early_bound_lifetimes_from_generics(tcx, ast_generics).count() as u32;
 
     // Collect the predicates that were written inline by the user on each
     // type parameter (e.g., `<T: Foo>`).
@@ -2396,7 +2354,7 @@ fn const_evaluatable_predicates_of<'tcx>(
         fn visit_anon_const(&mut self, c: &'tcx hir::AnonConst) {
             let def_id = self.tcx.hir().local_def_id(c.hir_id);
             let ct = ty::Const::from_anon_const(self.tcx, def_id);
-            if let ty::ConstKind::Unevaluated(uv) = ct.val() {
+            if let ty::ConstKind::Unevaluated(uv) = ct.kind() {
                 assert_eq!(uv.promoted, None);
                 let span = self.tcx.hir().span(c.hir_id);
                 self.preds.insert((
@@ -2454,7 +2412,7 @@ fn trait_explicit_predicates_and_bounds(
     gather_explicit_predicates_of(tcx, def_id.to_def_id())
 }
 
-fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicates<'_> {
+fn explicit_predicates_of<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> ty::GenericPredicates<'tcx> {
     let def_kind = tcx.def_kind(def_id);
     if let DefKind::Trait = def_kind {
         // Remove bounds on associated types from the predicates, they will be
@@ -2462,7 +2420,7 @@ fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicat
         let predicates_and_bounds = tcx.trait_explicit_predicates_and_bounds(def_id.expect_local());
         let trait_identity_substs = InternalSubsts::identity_for_item(tcx, def_id);
 
-        let is_assoc_item_ty = |ty: Ty<'_>| {
+        let is_assoc_item_ty = |ty: Ty<'tcx>| {
             // For a predicate from a where clause to become a bound on an
             // associated type:
             // * It must use the identity substs of the item.
@@ -2610,9 +2568,9 @@ fn is_foreign_item(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
 fn generator_kind(tcx: TyCtxt<'_>, def_id: DefId) -> Option<hir::GeneratorKind> {
     match tcx.hir().get_if_local(def_id) {
         Some(Node::Expr(&rustc_hir::Expr {
-            kind: rustc_hir::ExprKind::Closure(_, _, body_id, _, _),
+            kind: rustc_hir::ExprKind::Closure { body, .. },
             ..
-        })) => tcx.hir().body(body_id).generator_kind(),
+        })) => tcx.hir().body(body).generator_kind(),
         Some(_) => None,
         _ => bug!("generator_kind applied to non-local def-id {:?}", def_id),
     }
@@ -2627,7 +2585,7 @@ fn from_target_feature(
     let Some(list) = attr.meta_item_list() else { return };
     let bad_item = |span| {
         let msg = "malformed `target_feature` attribute input";
-        let code = "enable = \"..\"".to_owned();
+        let code = "enable = \"..\"";
         tcx.sess
             .struct_span_err(span, msg)
             .span_suggestion(span, "must be of the form", code, Applicability::HasPlaceholders)

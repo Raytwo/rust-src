@@ -5,7 +5,6 @@ use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{
     self, Binder, EarlyBinder, Predicate, PredicateKind, ToPredicate, Ty, TyCtxt,
 };
-use rustc_span::{sym, Span};
 use rustc_trait_selection::traits;
 
 fn sized_constraint_for_ty<'tcx>(
@@ -13,7 +12,7 @@ fn sized_constraint_for_ty<'tcx>(
     adtdef: ty::AdtDef<'tcx>,
     ty: Ty<'tcx>,
 ) -> Vec<Ty<'tcx>> {
-    use ty::TyKind::*;
+    use rustc_type_ir::sty::TyKind::*;
 
     let result = match ty.kind() {
         Bool | Char | Int(..) | Uint(..) | Float(..) | RawPtr(..) | Ref(..) | FnDef(..)
@@ -103,21 +102,6 @@ fn adt_sized_constraint(tcx: TyCtxt<'_>, def_id: DefId) -> ty::AdtSizedConstrain
     ty::AdtSizedConstraint(result)
 }
 
-fn def_ident_span(tcx: TyCtxt<'_>, def_id: DefId) -> Option<Span> {
-    tcx.hir()
-        .get_if_local(def_id)
-        .and_then(|node| match node {
-            // A `Ctor` doesn't have an identifier itself, but its parent
-            // struct/variant does. Compare with `hir::Map::opt_span`.
-            hir::Node::Ctor(ctor) => ctor
-                .ctor_hir_id()
-                .and_then(|ctor_id| tcx.hir().find(tcx.hir().get_parent_node(ctor_id)))
-                .and_then(|parent| parent.ident()),
-            _ => node.ident(),
-        })
-        .map(|ident| ident.span)
-}
-
 /// See `ParamEnv` struct definition for details.
 #[instrument(level = "debug", skip(tcx))]
 fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
@@ -153,7 +137,7 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
     let constness = match hir_id {
         Some(hir_id) => match tcx.hir().get(hir_id) {
             hir::Node::TraitItem(hir::TraitItem { kind: hir::TraitItemKind::Fn(..), .. })
-                if tcx.has_attr(def_id, sym::default_method_body_is_const) =>
+                if tcx.is_const_default_method(def_id) =>
             {
                 hir::Constness::Const
             }
@@ -480,7 +464,6 @@ pub fn provide(providers: &mut ty::query::Providers) {
     *providers = ty::query::Providers {
         asyncness,
         adt_sized_constraint,
-        def_ident_span,
         param_env,
         param_env_reveal_all_normalized,
         instance_def_size_estimate,

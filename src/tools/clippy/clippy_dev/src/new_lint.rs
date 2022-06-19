@@ -34,7 +34,12 @@ impl<T> Context for io::Result<T> {
 /// # Errors
 ///
 /// This function errors out if the files couldn't be created or written to.
-pub fn create(pass: Option<&str>, lint_name: Option<&str>, category: Option<&str>, msrv: bool) -> io::Result<()> {
+pub fn create(
+    pass: Option<&String>,
+    lint_name: Option<&String>,
+    category: Option<&String>,
+    msrv: bool,
+) -> io::Result<()> {
     let lint = LintData {
         pass: pass.expect("`pass` argument is validated by clap"),
         name: lint_name.expect("`name` argument is validated by clap"),
@@ -133,7 +138,7 @@ fn to_camel_case(name: &str) -> String {
         .collect()
 }
 
-fn get_stabilisation_version() -> String {
+fn get_stabilization_version() -> String {
     fn parse_manifest(contents: &str) -> Option<String> {
         let version = contents
             .lines()
@@ -199,7 +204,7 @@ fn get_lint_file_contents(lint: &LintData<'_>, enable_msrv: bool) -> String {
         },
     };
 
-    let version = get_stabilisation_version();
+    let version = get_stabilization_version();
     let lint_name = lint.name;
     let category = lint.category;
     let name_camel = to_camel_case(lint.name);

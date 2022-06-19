@@ -406,6 +406,16 @@ impl<'ll, 'tcx> IntrinsicCallMethods<'tcx> for Builder<'_, 'll, 'tcx> {
         self.call_intrinsic("llvm.type.test", &[bitcast, typeid])
     }
 
+    fn type_checked_load(
+        &mut self,
+        llvtable: &'ll Value,
+        vtable_byte_offset: u64,
+        typeid: &'ll Value,
+    ) -> Self::Value {
+        let vtable_byte_offset = self.const_i32(vtable_byte_offset as i32);
+        self.call_intrinsic("llvm.type.checked.load", &[llvtable, vtable_byte_offset, typeid])
+    }
+
     fn va_start(&mut self, va_list: &'ll Value) -> &'ll Value {
         self.call_intrinsic("llvm.va_start", &[va_list])
     }
@@ -816,7 +826,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
     span: Span,
 ) -> Result<&'ll Value, ()> {
     // macros for error handling:
-    #[cfg_attr(not(bootstrap), allow(unused_macro_rules))]
+    #[allow(unused_macro_rules)]
     macro_rules! emit_error {
         ($msg: tt) => {
             emit_error!($msg, )
@@ -1145,7 +1155,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         span: Span,
         args: &[OperandRef<'tcx, &'ll Value>],
     ) -> Result<&'ll Value, ()> {
-        #[cfg_attr(not(bootstrap), allow(unused_macro_rules))]
+        #[allow(unused_macro_rules)]
         macro_rules! emit_error {
             ($msg: tt) => {
                 emit_error!($msg, )

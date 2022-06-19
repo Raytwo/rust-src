@@ -170,7 +170,7 @@ impl ParseSess {
     /// * `relative` - If Some(symbol), the symbol name is a directory relative to the dir_path.
     ///   If relative is Some, resolve the submodle at {dir_path}/{symbol}/{id}.rs
     ///   or {dir_path}/{symbol}/{id}/mod.rs. if None, resolve the module at {dir_path}/{id}.rs.
-    /// *  `dir_path` - Module resolution will occur relative to this direcotry.
+    /// *  `dir_path` - Module resolution will occur relative to this directory.
     pub(crate) fn default_submod_path(
         &self,
         id: symbol::Ident,
@@ -433,7 +433,7 @@ mod tests {
                 Some(ignore_list),
             );
             let span = MultiSpan::from_span(mk_sp(BytePos(0), BytePos(1)));
-            let non_fatal_diagnostic = build_diagnostic(DiagnosticLevel::Warning, Some(span));
+            let non_fatal_diagnostic = build_diagnostic(DiagnosticLevel::Warning(None), Some(span));
             emitter.emit_diagnostic(&non_fatal_diagnostic);
             assert_eq!(num_emitted_errors.load(Ordering::Acquire), 0);
             assert_eq!(can_reset_errors.load(Ordering::Acquire), true);
@@ -457,7 +457,7 @@ mod tests {
                 None,
             );
             let span = MultiSpan::from_span(mk_sp(BytePos(0), BytePos(1)));
-            let non_fatal_diagnostic = build_diagnostic(DiagnosticLevel::Warning, Some(span));
+            let non_fatal_diagnostic = build_diagnostic(DiagnosticLevel::Warning(None), Some(span));
             emitter.emit_diagnostic(&non_fatal_diagnostic);
             assert_eq!(num_emitted_errors.load(Ordering::Acquire), 1);
             assert_eq!(can_reset_errors.load(Ordering::Acquire), false);
@@ -494,8 +494,8 @@ mod tests {
             );
             let bar_span = MultiSpan::from_span(mk_sp(BytePos(0), BytePos(1)));
             let foo_span = MultiSpan::from_span(mk_sp(BytePos(21), BytePos(22)));
-            let bar_diagnostic = build_diagnostic(DiagnosticLevel::Warning, Some(bar_span));
-            let foo_diagnostic = build_diagnostic(DiagnosticLevel::Warning, Some(foo_span));
+            let bar_diagnostic = build_diagnostic(DiagnosticLevel::Warning(None), Some(bar_span));
+            let foo_diagnostic = build_diagnostic(DiagnosticLevel::Warning(None), Some(foo_span));
             let fatal_diagnostic = build_diagnostic(DiagnosticLevel::Fatal, None);
             emitter.emit_diagnostic(&bar_diagnostic);
             emitter.emit_diagnostic(&foo_diagnostic);

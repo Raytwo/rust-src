@@ -6,7 +6,8 @@ use super::*;
 use crate::infer::region_constraints::{Constraint, RegionConstraintData};
 use crate::infer::InferCtxt;
 use crate::traits::project::ProjectAndUnifyResult;
-use rustc_middle::ty::fold::TypeFolder;
+use rustc_middle::mir::interpret::ErrorHandled;
+use rustc_middle::ty::fold::{TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::{Region, RegionVid, Term};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -828,13 +829,22 @@ impl<'tcx> AutoTraitFinder<'tcx> {
                 }
                 ty::PredicateKind::ConstEquate(c1, c2) => {
                     let evaluate = |c: ty::Const<'tcx>| {
-                        if let ty::ConstKind::Unevaluated(unevaluated) = c.val() {
+                        if let ty::ConstKind::Unevaluated(unevaluated) = c.kind() {
                             match select.infcx().const_eval_resolve(
                                 obligation.param_env,
                                 unevaluated,
                                 Some(obligation.cause.span),
                             ) {
-                                Ok(val) => Ok(ty::Const::from_value(select.tcx(), val, c.ty())),
+                                Ok(Some(valtree)) => {
+                                    Ok(ty::Const::from_value(select.tcx(), valtree, c.ty()))
+                                }
+                                Ok(None) => {
+                                    let tcx = self.tcx;
+                                    let def_id = unevaluated.def.did;
+                                    let reported = tcx.sess.struct_span_err(tcx.def_span(def_id), &format!("unable to construct a constant value for the unevaluated constant {:?}", unevaluated)).emit();
+
+                                    Err(ErrorHandled::Reported(reported))
+                                }
                                 Err(err) => Err(err),
                             }
                         } else {

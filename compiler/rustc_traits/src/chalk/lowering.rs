@@ -33,9 +33,10 @@
 
 use rustc_ast::ast;
 use rustc_middle::traits::{ChalkEnvironmentAndGoal, ChalkRustInterner as RustInterner};
-use rustc_middle::ty::fold::TypeFolder;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, SubstsRef};
-use rustc_middle::ty::{self, Binder, Region, Ty, TyCtxt, TypeFoldable, TypeVisitor};
+use rustc_middle::ty::{
+    self, Binder, Region, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitor,
+};
 use rustc_span::def_id::DefId;
 
 use chalk_ir::{FnSig, ForeignDefId};
@@ -513,7 +514,7 @@ impl<'tcx> LowerInto<'tcx, Region<'tcx>> for &chalk_ir::Lifetime<RustInterner<'t
 impl<'tcx> LowerInto<'tcx, chalk_ir::Const<RustInterner<'tcx>>> for ty::Const<'tcx> {
     fn lower_into(self, interner: RustInterner<'tcx>) -> chalk_ir::Const<RustInterner<'tcx>> {
         let ty = self.ty().lower_into(interner);
-        let value = match self.val() {
+        let value = match self.kind() {
             ty::ConstKind::Value(val) => {
                 chalk_ir::ConstValue::Concrete(chalk_ir::ConcreteConst { interned: val })
             }
@@ -530,7 +531,7 @@ impl<'tcx> LowerInto<'tcx, ty::Const<'tcx>> for &chalk_ir::Const<RustInterner<'t
     fn lower_into(self, interner: RustInterner<'tcx>) -> ty::Const<'tcx> {
         let data = self.data(interner);
         let ty = data.ty.lower_into(interner);
-        let val = match data.value {
+        let kind = match data.value {
             chalk_ir::ConstValue::BoundVar(var) => ty::ConstKind::Bound(
                 ty::DebruijnIndex::from_u32(var.debruijn.depth()),
                 ty::BoundVar::from_u32(var.index as u32),
@@ -539,7 +540,7 @@ impl<'tcx> LowerInto<'tcx, ty::Const<'tcx>> for &chalk_ir::Const<RustInterner<'t
             chalk_ir::ConstValue::Placeholder(_p) => unimplemented!(),
             chalk_ir::ConstValue::Concrete(c) => ty::ConstKind::Value(c.interned),
         };
-        interner.tcx.mk_const(ty::ConstS { ty, val })
+        interner.tcx.mk_const(ty::ConstS { ty, kind })
     }
 }
 

@@ -42,7 +42,8 @@ declare_clippy_lint! {
     ///     dst[i + 64] = src[i];
     /// }
     /// ```
-    /// Could be written as:
+    ///
+    /// Use instead:
     /// ```rust
     /// # let src = vec![1];
     /// # let mut dst = vec![0; 65];
@@ -70,7 +71,8 @@ declare_clippy_lint! {
     ///     println!("{}", vec[i]);
     /// }
     /// ```
-    /// Could be written as:
+    ///
+    /// Use instead:
     /// ```rust
     /// let vec = vec!['a', 'b', 'c'];
     /// for i in vec {
@@ -103,7 +105,8 @@ declare_clippy_lint! {
     ///     // ..
     /// }
     /// ```
-    /// can be rewritten to
+    ///
+    /// Use instead:
     /// ```rust
     /// # let y = vec![1];
     /// for x in &y {
@@ -180,29 +183,28 @@ declare_clippy_lint! {
     /// ### Example
     /// ```rust
     /// # let opt = Some(1);
-    ///
-    /// // Bad
+    /// # let res: Result<i32, std::io::Error> = Ok(1);
     /// for x in opt {
     ///     // ..
     /// }
     ///
-    /// // Good
-    /// if let Some(x) = opt {
-    ///     // ..
-    /// }
-    /// ```
-    ///
-    /// // or
-    ///
-    /// ```rust
-    /// # let res: Result<i32, std::io::Error> = Ok(1);
-    ///
-    /// // Bad
     /// for x in &res {
     ///     // ..
     /// }
     ///
-    /// // Good
+    /// for x in res.iter() {
+    ///     // ..
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    /// ```rust
+    /// # let opt = Some(1);
+    /// # let res: Result<i32, std::io::Error> = Ok(1);
+    /// if let Some(x) = opt {
+    ///     // ..
+    /// }
+    ///
     /// if let Ok(x) = res {
     ///     // ..
     /// }
@@ -287,7 +289,8 @@ declare_clippy_lint! {
     ///     i += 1;
     /// }
     /// ```
-    /// Could be written as
+    ///
+    /// Use instead:
     /// ```rust
     /// # let v = vec![1];
     /// # fn bar(bar: usize, baz: usize) {}
@@ -474,7 +477,7 @@ declare_clippy_lint! {
     ///
     /// ### Why is this bad?
     /// This kind of operation can be expressed more succinctly with
-    /// `vec![item;SIZE]` or `vec.resize(NEW_SIZE, item)` and using these alternatives may also
+    /// `vec![item; SIZE]` or `vec.resize(NEW_SIZE, item)` and using these alternatives may also
     /// have better performance.
     ///
     /// ### Example
@@ -489,7 +492,8 @@ declare_clippy_lint! {
     ///     vec.push(item2);
     /// }
     /// ```
-    /// could be written as
+    ///
+    /// Use instead:
     /// ```rust
     /// let item1 = 2;
     /// let item2 = 3;
@@ -517,7 +521,8 @@ declare_clippy_lint! {
     ///     println!("{}", item);
     /// }
     /// ```
-    /// could be written as
+    ///
+    /// Use instead:
     /// ```rust
     /// let item1 = 2;
     /// let item = &item1;
@@ -591,7 +596,7 @@ declare_clippy_lint! {
     ///     std::hint::spin_loop()
     /// }
     /// ```
-    #[clippy::version = "1.59.0"]
+    #[clippy::version = "1.61.0"]
     pub MISSING_SPIN_LOOP,
     perf,
     "An empty busy waiting loop"
@@ -620,7 +625,6 @@ declare_lint_pass!(Loops => [
 ]);
 
 impl<'tcx> LateLintPass<'tcx> for Loops {
-    #[allow(clippy::too_many_lines)]
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         let for_loop = higher::ForLoop::hir(expr);
         if let Some(higher::ForLoop {
@@ -701,10 +705,14 @@ fn check_for_loop_arg(cx: &LateContext<'_>, pat: &Pat<'_>, arg: &Expr<'_>) {
         let method_name = method.ident.as_str();
         // check for looping over x.iter() or x.iter_mut(), could use &x or &mut x
         match method_name {
-            "iter" | "iter_mut" => explicit_iter_loop::check(cx, self_arg, arg, method_name),
+            "iter" | "iter_mut" => {
+                explicit_iter_loop::check(cx, self_arg, arg, method_name);
+                for_loops_over_fallibles::check(cx, pat, self_arg, Some(method_name));
+            },
             "into_iter" => {
                 explicit_iter_loop::check(cx, self_arg, arg, method_name);
                 explicit_into_iter_loop::check(cx, self_arg, arg);
+                for_loops_over_fallibles::check(cx, pat, self_arg, Some(method_name));
             },
             "next" => {
                 next_loop_linted = iter_next_loop::check(cx, arg);
@@ -714,6 +722,6 @@ fn check_for_loop_arg(cx: &LateContext<'_>, pat: &Pat<'_>, arg: &Expr<'_>) {
     }
 
     if !next_loop_linted {
-        for_loops_over_fallibles::check(cx, pat, arg);
+        for_loops_over_fallibles::check(cx, pat, arg, None);
     }
 }

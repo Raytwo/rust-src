@@ -362,6 +362,12 @@ pub use self::traits::Iterator;
 )]
 pub use self::range::Step;
 
+#[unstable(
+    feature = "iter_from_generator",
+    issue = "43122",
+    reason = "generators are unstable"
+)]
+pub use self::sources::from_generator;
 #[stable(feature = "iter_empty", since = "1.2.0")]
 pub use self::sources::{empty, Empty};
 #[stable(feature = "iter_from_fn", since = "1.34.0")]
@@ -392,6 +398,8 @@ pub use self::traits::{
 
 #[stable(feature = "iter_zip", since = "1.59.0")]
 pub use self::adapters::zip;
+#[unstable(feature = "std_internals", issue = "none")]
+pub use self::adapters::ByRefSized;
 #[stable(feature = "iter_cloned", since = "1.1.0")]
 pub use self::adapters::Cloned;
 #[stable(feature = "iter_copied", since = "1.36.0")]
@@ -416,7 +424,7 @@ pub use self::adapters::{
 #[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
 pub use self::adapters::{Intersperse, IntersperseWith};
 
-pub(crate) use self::adapters::{try_process, ByRefSized};
+pub(crate) use self::adapters::try_process;
 
 mod adapters;
 mod range;

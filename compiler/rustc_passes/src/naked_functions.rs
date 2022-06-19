@@ -212,7 +212,7 @@ impl<'tcx> CheckInlineAssembly<'tcx> {
             | ExprKind::Loop(..)
             | ExprKind::Match(..)
             | ExprKind::If(..)
-            | ExprKind::Closure(..)
+            | ExprKind::Closure { .. }
             | ExprKind::Assign(..)
             | ExprKind::AssignOp(..)
             | ExprKind::Field(..)
@@ -308,7 +308,7 @@ impl<'tcx> CheckInlineAssembly<'tcx> {
                 last_span,
                 "consider specifying that the asm block is responsible \
                 for returning from the function",
-                String::from(", options(noreturn)"),
+                ", options(noreturn)",
                 Applicability::MachineApplicable,
             )
             .emit();

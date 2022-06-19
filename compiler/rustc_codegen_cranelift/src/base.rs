@@ -393,6 +393,7 @@ fn codegen_fn_content(fx: &mut FunctionCx<'_, '_, '_>) {
                 func,
                 args,
                 destination,
+                target,
                 fn_span,
                 cleanup: _,
                 from_hir_call: _,
@@ -404,6 +405,7 @@ fn codegen_fn_content(fx: &mut FunctionCx<'_, '_, '_>) {
                         func,
                         args,
                         *destination,
+                        *target,
                     )
                 });
             }
@@ -605,7 +607,13 @@ fn codegen_stmt<'tcx>(
                     let operand = codegen_operand(fx, operand);
                     lval.write_cvalue(fx, operand.cast_pointer_to(to_layout));
                 }
-                Rvalue::Cast(CastKind::Misc, ref operand, to_ty) => {
+                Rvalue::Cast(
+                    CastKind::Misc
+                    | CastKind::PointerExposeAddress
+                    | CastKind::PointerFromExposedAddress,
+                    ref operand,
+                    to_ty,
+                ) => {
                     let operand = codegen_operand(fx, operand);
                     let from_ty = operand.layout().ty;
                     let to_ty = fx.monomorphize(to_ty);
@@ -702,7 +710,7 @@ fn codegen_stmt<'tcx>(
                     let times = fx
                         .monomorphize(times)
                         .eval(fx.tcx, ParamEnv::reveal_all())
-                        .val()
+                        .kind()
                         .try_to_bits(fx.tcx.data_layout.pointer_size)
                         .unwrap();
                     if operand.layout().size.bytes() == 0 {

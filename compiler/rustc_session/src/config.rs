@@ -547,23 +547,6 @@ pub enum PrintRequest {
     LinkArgs,
 }
 
-#[derive(Copy, Clone)]
-pub enum BorrowckMode {
-    Mir,
-    Migrate,
-}
-
-impl BorrowckMode {
-    /// Returns whether we should run the MIR-based borrow check, but also fall back
-    /// on the AST borrow check if the MIR-based one errors.
-    pub fn migrate(self) -> bool {
-        match self {
-            BorrowckMode::Mir => false,
-            BorrowckMode::Migrate => true,
-        }
-    }
-}
-
 pub enum Input {
     /// Load source code from a file.
     File(PathBuf),
@@ -741,7 +724,6 @@ impl Default for Options {
             incremental: None,
             debugging_opts: Default::default(),
             prints: Vec::new(),
-            borrowck_mode: BorrowckMode::Migrate,
             cg: Default::default(),
             error_format: ErrorOutputType::default(),
             externs: Externs(BTreeMap::new()),
@@ -1450,7 +1432,7 @@ pub fn get_cmd_lint_options(
     let mut lint_opts_with_position = vec![];
     let mut describe_lints = false;
 
-    for level in [lint::Allow, lint::Warn, lint::ForceWarn, lint::Deny, lint::Forbid] {
+    for level in [lint::Allow, lint::Warn, lint::ForceWarn(None), lint::Deny, lint::Forbid] {
         for (arg_pos, lint_name) in matches.opt_strs_pos(level.as_str()) {
             if lint_name == "help" {
                 describe_lints = true;
@@ -1938,21 +1920,6 @@ fn parse_native_lib_kind(
 
     let kind = match kind {
         "static" => NativeLibKind::Static { bundle: None, whole_archive: None },
-        "static-nobundle" => {
-            early_warn(
-                error_format,
-                "library kind `static-nobundle` has been superseded by specifying \
-                 modifier `-bundle` with library kind `static`. Try `static:-bundle`",
-            );
-            if !nightly_options::match_is_nightly_build(matches) {
-                early_error(
-                    error_format,
-                    "library kind `static-nobundle` is unstable \
-                     and only accepted on the nightly compiler",
-                );
-            }
-            NativeLibKind::Static { bundle: Some(false), whole_archive: None }
-        }
         "dylib" => NativeLibKind::Dylib { as_needed: None },
         "framework" => NativeLibKind::Framework { as_needed: None },
         _ => early_error(
@@ -2005,10 +1972,7 @@ fn parse_native_lib_modifiers(
             }
         };
         match (modifier, &mut kind) {
-            ("bundle", NativeLibKind::Static { bundle, .. }) => {
-                report_unstable_modifier();
-                assign_modifier(bundle)
-            }
+            ("bundle", NativeLibKind::Static { bundle, .. }) => assign_modifier(bundle),
             ("bundle", _) => early_error(
                 error_format,
                 "linking modifier `bundle` is only compatible with `static` linking kind",
@@ -2082,14 +2046,6 @@ fn parse_libs(matches: &getopts::Matches, error_format: ErrorOutputType) -> Vec<
             NativeLib { name, new_name, kind, verbatim }
         })
         .collect()
-}
-
-fn parse_borrowck_mode(dopts: &DebuggingOptions, error_format: ErrorOutputType) -> BorrowckMode {
-    match dopts.borrowck.as_ref() {
-        "migrate" => BorrowckMode::Migrate,
-        "mir" => BorrowckMode::Mir,
-        m => early_error(error_format, &format!("unknown borrowck mode `{m}`")),
-    }
 }
 
 pub fn parse_externs(
@@ -2429,8 +2385,6 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
 
     let test = matches.opt_present("test");
 
-    let borrowck_mode = parse_borrowck_mode(&debugging_opts, error_format);
-
     if !cg.remark.is_empty() && debuginfo == DebugInfo::None {
         early_warn(error_format, "-C remark requires \"-C debuginfo=n\" to show source locations");
     }
@@ -2506,7 +2460,6 @@ pub fn build_session_options(matches: &getopts::Matches) -> Options {
         incremental,
         debugging_opts,
         prints,
-        borrowck_mode,
         cg,
         error_format,
         externs,

@@ -32,7 +32,7 @@ declare_clippy_lint! {
     ///     BattenbergCake,
     /// }
     /// ```
-    /// Could be written as:
+    /// Use instead:
     /// ```rust
     /// enum Cake {
     ///     BlackForest,
@@ -60,7 +60,8 @@ declare_clippy_lint! {
     ///     struct BlackForestCake;
     /// }
     /// ```
-    /// Could be written as:
+    ///
+    /// Use instead:
     /// ```rust
     /// mod cake {
     ///     struct BlackForest;
@@ -240,7 +241,7 @@ impl LateLintPass<'_> for EnumVariantNames {
         assert!(last.is_some());
     }
 
-    #[allow(clippy::similar_names)]
+    #[expect(clippy::similar_names)]
     fn check_item(&mut self, cx: &LateContext<'_>, item: &Item<'_>) {
         let item_name = item.ident.name.as_str();
         let item_camel = to_camel_case(item_name);

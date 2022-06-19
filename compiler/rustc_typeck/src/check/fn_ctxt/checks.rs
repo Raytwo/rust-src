@@ -47,6 +47,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    pub(in super::super) fn check_transmutes(&self) {
+        let mut deferred_transmute_checks = self.deferred_transmute_checks.borrow_mut();
+        debug!("FnCtxt::check_transmutes: {} deferred checks", deferred_transmute_checks.len());
+        for (from, to, span) in deferred_transmute_checks.drain(..) {
+            self.check_transmute(span, from, to);
+        }
+    }
+
+    pub(in super::super) fn check_asms(&self) {
+        let mut deferred_asm_checks = self.deferred_asm_checks.borrow_mut();
+        debug!("FnCtxt::check_asm: {} deferred checks", deferred_asm_checks.len());
+        for (asm, hir_id) in deferred_asm_checks.drain(..) {
+            let enclosing_id = self.tcx.hir().enclosing_body_owner(hir_id);
+            self.check_asm(asm, enclosing_id);
+        }
+    }
+
     pub(in super::super) fn check_method_argument_types(
         &self,
         sp: Span,
@@ -370,7 +387,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     continue;
                 }
 
-                let is_closure = matches!(arg.kind, ExprKind::Closure(..));
+                let is_closure = matches!(arg.kind, ExprKind::Closure { .. });
                 if is_closure != check_closures {
                     continue;
                 }
@@ -428,16 +445,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let found_errors = !errors.is_empty();
 
             errors.drain_filter(|error| {
-                let Error::Invalid(input_idx, arg_idx, Compatibility::Incompatible(error)) = error else { return false };
+                let Error::Invalid(input_idx, arg_idx, Compatibility::Incompatible(Some(e))) = error else { return false };
                 let expected_ty = expected_input_tys[*arg_idx];
-                let provided_ty = final_arg_types[*input_idx].map(|ty| ty.0).unwrap();
+                let provided_ty = final_arg_types[*input_idx].map(|ty| ty.0).unwrap_or_else(|| tcx.ty_error());
                 let cause = &self.misc(provided_args[*input_idx].span);
                 let trace = TypeTrace::types(cause, true, expected_ty, provided_ty);
-                if let Some(e) = error {
-                    if !matches!(trace.cause.as_failure_code(e), FailureCode::Error0308(_)) {
-                        self.report_and_explain_type_error(trace, e).emit();
-                        return true;
-                    }
+                if !matches!(trace.cause.as_failure_code(e), FailureCode::Error0308(_)) {
+                    self.report_and_explain_type_error(trace, e).emit();
+                    return true;
                 }
                 false
             });
@@ -568,7 +583,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 )) = errors.iter().next()
                 {
                     let expected_ty = expected_input_tys[*arg_idx];
-                    let provided_ty = final_arg_types[*arg_idx].map(|ty| ty.0).unwrap();
+                    let provided_ty = final_arg_types[*input_idx]
+                        .map(|ty| ty.0)
+                        .unwrap_or_else(|| tcx.ty_error());
                     let expected_ty = self.resolve_vars_if_possible(expected_ty);
                     let provided_ty = self.resolve_vars_if_possible(provided_ty);
                     let cause = &self.misc(provided_args[*input_idx].span);
@@ -578,7 +595,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         &mut err,
                         &provided_args[*input_idx],
                         provided_ty,
-                        final_arg_types[*input_idx].map(|ty| ty.1).unwrap(),
+                        final_arg_types[*input_idx]
+                            .map(|ty| ty.1)
+                            .unwrap_or_else(|| tcx.ty_error()),
                         None,
                         None,
                     );
@@ -635,7 +654,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 match error {
                     Error::Invalid(input_idx, arg_idx, compatibility) => {
                         let expected_ty = expected_input_tys[arg_idx];
-                        let provided_ty = final_arg_types[input_idx].map(|ty| ty.0).unwrap();
+                        let provided_ty = final_arg_types[input_idx]
+                            .map(|ty| ty.0)
+                            .unwrap_or_else(|| tcx.ty_error());
                         let expected_ty = self.resolve_vars_if_possible(expected_ty);
                         let provided_ty = self.resolve_vars_if_possible(provided_ty);
                         if let Compatibility::Incompatible(error) = &compatibility {
@@ -657,8 +678,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         self.emit_coerce_suggestions(
                             &mut err,
                             &provided_args[input_idx],
-                            final_arg_types[input_idx].map(|ty| ty.0).unwrap(),
-                            final_arg_types[input_idx].map(|ty| ty.1).unwrap(),
+                            provided_ty,
+                            // FIXME(compiler-errors): expected_ty?
+                            final_arg_types[input_idx]
+                                .map(|ty| ty.1)
+                                .unwrap_or_else(|| tcx.ty_error()),
                             None,
                             None,
                         );
@@ -768,7 +792,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 let second_input_ty =
                                     self.resolve_vars_if_possible(expected_input_tys[second_idx]);
                                 let third_input_ty =
-                                    self.resolve_vars_if_possible(expected_input_tys[second_idx]);
+                                    self.resolve_vars_if_possible(expected_input_tys[third_idx]);
                                 let span = if third_idx < provided_arg_count {
                                     let first_arg_span = provided_args[first_idx].span;
                                     let third_arg_span = provided_args[third_idx].span;
@@ -809,16 +833,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             }
                             missing_idxs => {
                                 let first_idx = *missing_idxs.first().unwrap();
-                                let second_idx = *missing_idxs.last().unwrap();
+                                let last_idx = *missing_idxs.last().unwrap();
                                 // NOTE: Because we might be re-arranging arguments, might have extra arguments, etc.
                                 // It's hard to *really* know where we should provide this error label, so this is a
                                 // decent heuristic
-                                let span = if first_idx < provided_arg_count {
+                                let span = if last_idx < provided_arg_count {
                                     let first_arg_span = provided_args[first_idx].span;
-                                    let second_arg_span = provided_args[second_idx].span;
+                                    let last_arg_span = provided_args[last_idx].span;
                                     Span::new(
                                         first_arg_span.lo(),
-                                        second_arg_span.hi(),
+                                        last_arg_span.hi(),
                                         first_arg_span.ctxt(),
                                         None,
                                     )
@@ -843,9 +867,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         let first_expected_ty =
                             self.resolve_vars_if_possible(expected_input_tys[arg_idx]);
                         let first_provided_ty = if let Some((ty, _)) = final_arg_types[input_idx] {
-                            format!(",found `{}`", ty)
+                            format!(", found `{}`", ty)
                         } else {
-                            "".into()
+                            String::new()
                         };
                         labels.push((
                             first_span,
@@ -855,9 +879,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             self.resolve_vars_if_possible(expected_input_tys[other_arg_idx]);
                         let other_provided_ty =
                             if let Some((ty, _)) = final_arg_types[other_input_idx] {
-                                format!(",found `{}`", ty)
+                                format!(", found `{}`", ty)
                             } else {
-                                "".into()
+                                String::new()
                             };
                         labels.push((
                             second_span,
@@ -871,14 +895,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     Error::Permutation(args) => {
                         for (dst_arg, dest_input) in args {
                             let expected_ty =
-                                self.resolve_vars_if_possible(expected_input_tys[dest_input]);
-                            let provided_ty = if let Some((ty, _)) = final_arg_types[dst_arg] {
-                                format!(",found `{}`", ty)
+                                self.resolve_vars_if_possible(expected_input_tys[dst_arg]);
+                            let provided_ty = if let Some((ty, _)) = final_arg_types[dest_input] {
+                                format!(", found `{}`", ty)
                             } else {
-                                "".into()
+                                String::new()
                             };
                             labels.push((
-                                provided_args[dst_arg].span,
+                                provided_args[dest_input].span,
                                 format!("expected `{}`{}", expected_ty, provided_ty),
                             ));
                         }
@@ -959,7 +983,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Ideally this would be folded into the above, for uniform style
             // but c-variadic is already a corner case
             if c_variadic {
-                fn variadic_error<'tcx>(sess: &Session, span: Span, ty: Ty<'tcx>, cast_ty: &str) {
+                fn variadic_error<'tcx>(
+                    sess: &'tcx Session,
+                    span: Span,
+                    ty: Ty<'tcx>,
+                    cast_ty: &str,
+                ) {
                     use crate::structured_errors::MissingCastForVariadicArg;
 
                     MissingCastForVariadicArg { sess, span, ty, cast_ty }.diagnostic().emit();
@@ -1429,14 +1458,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 err.span_suggestion_verbose(
                     span_semi,
                     "consider removing this semicolon and boxing the expression",
-                    String::new(),
+                    "",
                     Applicability::HasPlaceholders,
                 );
             } else {
                 err.span_suggestion_short(
                     span_semi,
                     "remove this semicolon",
-                    String::new(),
+                    "",
                     Applicability::MachineApplicable,
                 );
             }
@@ -1542,13 +1571,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             QPath::TypeRelative(ref qself, ref segment) => {
                 let ty = self.to_ty(qself);
 
-                let res = if let hir::TyKind::Path(QPath::Resolved(_, ref path)) = qself.kind {
-                    path.res
-                } else {
-                    Res::Err
-                };
                 let result = <dyn AstConv<'_>>::associated_path_to_ty(
-                    self, hir_id, path_span, ty, res, segment, true,
+                    self, hir_id, path_span, ty, qself, segment, true,
                 );
                 let ty = result.map(|(ty, _, _)| ty).unwrap_or_else(|_| self.tcx().ty_error());
                 let result = result.map(|(_, kind, def_id)| (kind, def_id));
@@ -1739,8 +1763,7 @@ fn label_fn_like<'tcx>(
             .get_if_local(def_id)
             .and_then(|node| node.body_id())
             .into_iter()
-            .map(|id| tcx.hir().body(id).params)
-            .flatten();
+            .flat_map(|id| tcx.hir().body(id).params);
 
         for param in params {
             spans.push_span_label(param.span, String::new());
@@ -1751,10 +1774,10 @@ fn label_fn_like<'tcx>(
     } else {
         match tcx.hir().get_if_local(def_id) {
             Some(hir::Node::Expr(hir::Expr {
-                kind: hir::ExprKind::Closure(_, _, _, span, ..),
+                kind: hir::ExprKind::Closure { fn_decl_span, .. },
                 ..
             })) => {
-                let spans: MultiSpan = (*span).into();
+                let spans: MultiSpan = (*fn_decl_span).into();
 
                 // Note: We don't point to param spans here because they overlap
                 // with the closure span itself

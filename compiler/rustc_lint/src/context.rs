@@ -324,7 +324,7 @@ impl LintStore {
         registered_tools: &RegisteredTools,
     ) {
         let (tool_name, lint_name_only) = parse_lint_and_tool_name(lint_name);
-        if lint_name_only == crate::WARNINGS.name_lower() && level == Level::ForceWarn {
+        if lint_name_only == crate::WARNINGS.name_lower() && matches!(level, Level::ForceWarn(_)) {
             struct_span_err!(
                 sess,
                 DUMMY_SP,
@@ -375,7 +375,7 @@ impl LintStore {
                 match level {
                     Level::Allow => "-A",
                     Level::Warn => "-W",
-                    Level::ForceWarn => "--force-warn",
+                    Level::ForceWarn(_) => "--force-warn",
                     Level::Deny => "-D",
                     Level::Forbid => "-F",
                     Level::Expect(_) => {
@@ -718,7 +718,7 @@ pub trait LintContext: Sized {
                                   the macro must produce the documentation as part of its expansion");
                 }
                 BuiltinLintDiagnostics::PatternsInFnsWithoutBody(span, ident) => {
-                    db.span_suggestion(span, "remove `mut` from the parameter", ident.to_string(), Applicability::MachineApplicable);
+                    db.span_suggestion(span, "remove `mut` from the parameter", ident, Applicability::MachineApplicable);
                 }
                 BuiltinLintDiagnostics::MissingAbi(span, default_abi) => {
                     db.span_label(span, "ABI should be specified here");
@@ -778,7 +778,7 @@ pub trait LintContext: Sized {
 
                     // Suggest the most probable if we found one
                     if let Some(best_match) = find_best_match_for_name(&possibilities, name, None) {
-                        db.span_suggestion(name_span, "did you mean", format!("{best_match}"), Applicability::MaybeIncorrect);
+                        db.span_suggestion(name_span, "did you mean", best_match, Applicability::MaybeIncorrect);
                     }
                 },
                 BuiltinLintDiagnostics::UnexpectedCfg((name, name_span), Some((value, value_span))) => {
@@ -805,7 +805,7 @@ pub trait LintContext: Sized {
                     } else {
                         db.note(&format!("no expected value for `{name}`"));
                         if name != sym::feature {
-                            db.span_suggestion(name_span.shrink_to_hi().to(value_span), "remove the value", String::new(), Applicability::MaybeIncorrect);
+                            db.span_suggestion(name_span.shrink_to_hi().to(value_span), "remove the value", "", Applicability::MaybeIncorrect);
                         }
                     }
                 },
@@ -852,7 +852,7 @@ pub trait LintContext: Sized {
                     db.span_suggestion(
                         deletion_span,
                         "elide the unused lifetime",
-                        String::new(),
+                        "",
                         Applicability::MachineApplicable,
                     );
                 },

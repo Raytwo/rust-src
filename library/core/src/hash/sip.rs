@@ -38,7 +38,7 @@ struct SipHasher24 {
 /// SipHash is a general-purpose hashing function: it runs at a good
 /// speed (competitive with Spooky and City) and permits strong _keyed_
 /// hashing. This lets you key your hash tables from a strong RNG, such as
-/// [`rand::os::OsRng`](https://doc.rust-lang.org/rand/rand/os/struct.OsRng.html).
+/// [`rand::os::OsRng`](https://docs.rs/rand/latest/rand/rngs/struct.OsRng.html).
 ///
 /// Although the SipHash algorithm is considered to be generally strong,
 /// it is not intended for cryptographic purposes. As such, all
@@ -96,7 +96,8 @@ macro_rules! compress {
 /// `copy_nonoverlapping` to let the compiler generate the most efficient way
 /// to load it from a possibly unaligned address.
 ///
-/// Unsafe because: unchecked indexing at i..i+size_of(int_ty)
+/// Safety: this performs unchecked indexing of `$buf` at
+/// `$i..$i+size_of::<$int_ty>()`, so that must be in-bounds.
 macro_rules! load_int_le {
     ($buf:expr, $i:expr, $int_ty:ident) => {{
         debug_assert!($i + mem::size_of::<$int_ty>() <= $buf.len());
@@ -114,7 +115,8 @@ macro_rules! load_int_le {
 /// `copy_nonoverlapping` calls that occur (via `load_int_le!`) all have fixed
 /// sizes and avoid calling `memcpy`, which is good for speed.
 ///
-/// Unsafe because: unchecked indexing at start..start+len
+/// Safety: this performs unchecked indexing of `buf` at `start..start+len`, so
+/// that must be in-bounds.
 #[inline]
 unsafe fn u8to64_le(buf: &[u8], start: usize, len: usize) -> u64 {
     debug_assert!(len < 8);

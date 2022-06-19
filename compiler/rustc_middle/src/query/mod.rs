@@ -271,8 +271,6 @@ rustc_queries! {
     }
 
     query expn_that_defined(key: DefId) -> rustc_span::ExpnId {
-        // This query reads from untracked data in definitions.
-        eval_always
         desc { |tcx| "expansion that defined `{}`", tcx.def_path_str(key) }
         separate_provide_extern
     }
@@ -804,10 +802,6 @@ rustc_queries! {
         desc { |tcx| "checking privacy in {}", describe_as_module(key, tcx) }
     }
 
-    query check_mod_intrinsics(key: LocalDefId) -> () {
-        desc { |tcx| "checking intrinsics in {}", describe_as_module(key, tcx) }
-    }
-
     query check_mod_liveness(key: LocalDefId) -> () {
         desc { |tcx| "checking liveness of variables in {}", describe_as_module(key, tcx) }
     }
@@ -971,36 +965,26 @@ rustc_queries! {
     query eval_to_valtree(
         key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>
     ) -> EvalToValTreeResult<'tcx> {
-        desc { "evaluate type-level constant" }
-        remap_env_constness
+        desc { "evaluating type-level constant" }
     }
 
     /// Converts a type level constant value into `ConstValue`
     query valtree_to_const_val(key: (Ty<'tcx>, ty::ValTree<'tcx>)) -> ConstValue<'tcx> {
-        desc { "convert type-level constant value to mir constant value"}
+        desc { "converting type-level constant value to mir constant value"}
     }
 
     /// Destructure a constant ADT or array into its variant index and its
     /// field values or return `None` if constant is invalid.
     ///
     /// Use infallible `TyCtxt::destructure_const` when you know that constant is valid.
-    query try_destructure_const(key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>) -> Option<mir::DestructuredConst<'tcx>> {
-        desc { "destructure type level constant"}
+    query try_destructure_const(key: ty::Const<'tcx>) -> Option<ty::DestructuredConst<'tcx>> {
+        desc { "destructuring type level constant"}
     }
 
     /// Tries to destructure an `mir::ConstantKind` ADT or array into its variant index
     /// and its field values.
     query try_destructure_mir_constant(key: ty::ParamEnvAnd<'tcx, mir::ConstantKind<'tcx>>) -> Option<mir::DestructuredMirConstant<'tcx>> {
-        desc { "destructure mir constant"}
-        remap_env_constness
-    }
-
-    /// Dereference a constant reference or raw pointer and turn the result into a constant
-    /// again.
-    query deref_const(
-        key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>
-    ) -> ty::Const<'tcx> {
-        desc { "deref constant" }
+        desc { "destructuring mir constant"}
         remap_env_constness
     }
 
@@ -1009,7 +993,7 @@ rustc_queries! {
     query deref_mir_constant(
         key: ty::ParamEnvAnd<'tcx, mir::ConstantKind<'tcx>>
     ) -> mir::ConstantKind<'tcx> {
-        desc { "deref constant" }
+        desc { "dereferencing mir constant" }
         remap_env_constness
     }
 
@@ -1050,7 +1034,7 @@ rustc_queries! {
 
     /// Per-body `region::ScopeTree`. The `DefId` should be the owner `DefId` for the body;
     /// in the case of closures, this will be redirected to the enclosing function.
-    query region_scope_tree(def_id: DefId) -> &'tcx region::ScopeTree {
+    query region_scope_tree(def_id: DefId) -> &'tcx crate::middle::region::ScopeTree {
         desc { |tcx| "computing drop scopes for `{}`", tcx.def_path_str(def_id) }
     }
 
@@ -1588,7 +1572,7 @@ rustc_queries! {
         Option<&'tcx FxHashMap<ItemLocalId, Region>> {
         desc { "looking up a named region" }
     }
-    query is_late_bound_map(_: LocalDefId) -> Option<(LocalDefId, &'tcx FxHashSet<LocalDefId>)> {
+    query is_late_bound_map(_: LocalDefId) -> Option<&'tcx FxHashSet<LocalDefId>> {
         desc { "testing if a region is late bound" }
     }
     /// For a given item (like a struct), gets the default lifetimes to be used
@@ -1601,11 +1585,6 @@ rustc_queries! {
     query late_bound_vars_map(_: LocalDefId)
         -> Option<&'tcx FxHashMap<ItemLocalId, Vec<ty::BoundVariableKind>>> {
         desc { "looking up late bound vars" }
-    }
-
-    query lifetime_scope_map(_: LocalDefId) -> Option<FxHashMap<ItemLocalId, LifetimeScopeForPath>> {
-        storage(ArenaCacheSelector<'tcx>)
-        desc { "finds the lifetime scope for an HirId of a PathSegment" }
     }
 
     query visibility(def_id: DefId) -> ty::Visibility {
@@ -1732,8 +1711,8 @@ rustc_queries! {
     query upvars_mentioned(def_id: DefId) -> Option<&'tcx FxIndexMap<hir::HirId, hir::Upvar>> {
         desc { |tcx| "collecting upvars mentioned in `{}`", tcx.def_path_str(def_id) }
     }
-    query maybe_unused_trait_import(def_id: LocalDefId) -> bool {
-        desc { |tcx| "maybe_unused_trait_import for `{}`", tcx.def_path_str(def_id.to_def_id()) }
+    query maybe_unused_trait_imports(_: ()) -> &'tcx FxIndexSet<LocalDefId> {
+        desc { "fetching potentially unused trait imports" }
     }
     query maybe_unused_extern_crates(_: ()) -> &'tcx [(LocalDefId, Span)] {
         desc { "looking up all possibly unused extern crates" }

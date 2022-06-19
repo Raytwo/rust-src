@@ -18,7 +18,9 @@ use rustc_errors::{FatalError, MultiSpan};
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::subst::{GenericArg, InternalSubsts, Subst};
-use rustc_middle::ty::{self, EarlyBinder, Ty, TyCtxt, TypeFoldable, TypeVisitor};
+use rustc_middle::ty::{
+    self, EarlyBinder, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable, TypeVisitor,
+};
 use rustc_middle::ty::{Predicate, ToPredicate};
 use rustc_session::lint::builtin::WHERE_CLAUSES_OBJECT_SAFETY;
 use rustc_span::symbol::Symbol;
@@ -98,7 +100,7 @@ fn object_safety_violations_for_trait(
                 span,
             ) = violation
             {
-                lint_object_unsafe_trait(tcx, *span, trait_def_id, violation);
+                lint_object_unsafe_trait(tcx, *span, trait_def_id, &violation);
                 false
             } else {
                 true
@@ -278,7 +280,7 @@ fn predicate_references_self<'tcx>(
     (predicate, sp): (ty::Predicate<'tcx>, Span),
 ) -> Option<Span> {
     let self_ty = tcx.types.self_param;
-    let has_self_ty = |arg: &GenericArg<'_>| arg.walk().any(|arg| arg == self_ty.into());
+    let has_self_ty = |arg: &GenericArg<'tcx>| arg.walk().any(|arg| arg == self_ty.into());
     match predicate.kind().skip_binder() {
         ty::PredicateKind::Trait(ref data) => {
             // In the case of a trait predicate, we can skip the "self" type.
@@ -814,10 +816,7 @@ fn contains_illegal_self_type_reference<'tcx, T: TypeFoldable<'tcx>>(
             }
         }
 
-        fn visit_unevaluated_const(
-            &mut self,
-            uv: ty::Unevaluated<'tcx>,
-        ) -> ControlFlow<Self::BreakTy> {
+        fn visit_unevaluated(&mut self, uv: ty::Unevaluated<'tcx>) -> ControlFlow<Self::BreakTy> {
             // Constants can only influence object safety if they reference `Self`.
             // This is only possible for unevaluated constants, so we walk these here.
             //

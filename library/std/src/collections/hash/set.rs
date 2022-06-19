@@ -33,13 +33,14 @@ use super::map::{map_try_reserve_error, RandomState};
 /// In other words, if two keys are equal, their hashes must be equal.
 ///
 ///
-/// It is a logic error for an item to be modified in such a way that the
-/// item's hash, as determined by the [`Hash`] trait, or its equality, as
-/// determined by the [`Eq`] trait, changes while it is in the set. This is
-/// normally only possible through [`Cell`], [`RefCell`], global state, I/O, or
-/// unsafe code. The behavior resulting from such a logic error is not
-/// specified (it could include panics, incorrect results, aborts, memory
-/// leaks, or non-termination) but will not be undefined behavior.
+/// It is a logic error for a key to be modified in such a way that the key's
+/// hash, as determined by the [`Hash`] trait, or its equality, as determined by
+/// the [`Eq`] trait, changes while it is in the map. This is normally only
+/// possible through [`Cell`], [`RefCell`], global state, I/O, or unsafe code.
+/// The behavior resulting from such a logic error is not specified, but will
+/// be encapsulated to the `HashSet` that observed the logic error and not
+/// result in undefined behavior. This could include panics, incorrect results,
+/// aborts, memory leaks, and non-termination.
 ///
 /// # Examples
 ///
@@ -587,6 +588,12 @@ where
     /// Visits the values representing the intersection,
     /// i.e., the values that are both in `self` and `other`.
     ///
+    /// When an equal element is present in `self` and `other`
+    /// then the resulting `Intersection` may yield references to
+    /// one or the other. This can be relevant if `T` contains fields which
+    /// are not compared by its `Eq` implementation, and may hold different
+    /// value between the two equal copies of `T` in the two sets.
+    ///
     /// # Examples
     ///
     /// ```
@@ -857,9 +864,10 @@ where
 
     /// Adds a value to the set.
     ///
-    /// If the set did not have this value present, `true` is returned.
+    /// Returns whether the value was newly inserted. That is:
     ///
-    /// If the set did have this value present, `false` is returned.
+    /// - If the set did not previously contain this value, `true` is returned.
+    /// - If the set already contained this value, `false` is returned.
     ///
     /// # Examples
     ///

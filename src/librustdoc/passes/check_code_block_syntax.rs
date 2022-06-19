@@ -122,7 +122,7 @@ impl<'a, 'tcx> SyntaxChecker<'a, 'tcx> {
                     diag.span_suggestion(
                         sp.from_inner(InnerSpan::new(0, 3)).shrink_to_hi(),
                         explanation,
-                        String::from("text"),
+                        "text",
                         Applicability::MachineApplicable,
                     );
                 }
@@ -160,7 +160,7 @@ impl<'a, 'tcx> DocVisitor for SyntaxChecker<'a, 'tcx> {
                 sp,
             );
             for code_block in markdown::rust_code_blocks(dox, &extra) {
-                self.check_rust_syntax(&item, dox, code_block);
+                self.check_rust_syntax(item, dox, code_block);
             }
         }
 

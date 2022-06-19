@@ -16,7 +16,6 @@ use rustc_hir as hir;
 use rustc_middle::mir::traversal::ReversePostorderIter;
 use rustc_middle::mir::visit::{MutVisitor, MutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
-use rustc_middle::ty::cast::CastTy;
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::{self, List, TyCtxt, TypeFoldable};
 use rustc_span::Span;
@@ -502,18 +501,12 @@ impl<'tcx> Validator<'_, 'tcx> {
 
             Rvalue::ThreadLocalRef(_) => return Err(Unpromotable),
 
-            Rvalue::Cast(kind, operand, cast_ty) => {
-                if matches!(kind, CastKind::Misc) {
-                    let operand_ty = operand.ty(self.body, self.tcx);
-                    let cast_in = CastTy::from_ty(operand_ty).expect("bad input type for cast");
-                    let cast_out = CastTy::from_ty(*cast_ty).expect("bad output type for cast");
-                    if let (CastTy::Ptr(_) | CastTy::FnPtr, CastTy::Int(_)) = (cast_in, cast_out) {
-                        // ptr-to-int casts are not possible in consts and thus not promotable
-                        return Err(Unpromotable);
-                    }
-                    // int-to-ptr casts are fine, they just use the integer value at pointer type.
-                }
+            // ptr-to-int casts are not possible in consts and thus not promotable
+            Rvalue::Cast(CastKind::PointerExposeAddress, _, _) => return Err(Unpromotable),
 
+            // all other casts including int-to-ptr casts are fine, they just use the integer value
+            // at pointer type.
+            Rvalue::Cast(_, operand, _) => {
                 self.validate_operand(operand)?;
             }
 
@@ -772,7 +765,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                         let unit = Rvalue::Use(Operand::Constant(Box::new(Constant {
                             span: statement.source_info.span,
                             user_ty: None,
-                            literal: ty::Const::zero_sized(self.tcx, self.tcx.types.unit).into(),
+                            literal: ConstantKind::zero_sized(self.tcx.types.unit),
                         })));
                         mem::replace(rhs, unit)
                     },
@@ -788,7 +781,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
             } else {
                 let terminator = self.source[loc.block].terminator_mut();
                 let target = match terminator.kind {
-                    TerminatorKind::Call { destination: Some((_, target)), .. } => target,
+                    TerminatorKind::Call { target: Some(target), .. } => target,
                     ref kind => {
                         span_bug!(terminator.source_info.span, "{:?} not promotable", kind);
                     }
@@ -814,7 +807,8 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                             func,
                             args,
                             cleanup: None,
-                            destination: Some((Place::from(new_temp), new_target)),
+                            destination: Place::from(new_temp),
+                            target: Some(new_target),
                             from_hir_call,
                             fn_span,
                         },
@@ -841,26 +835,25 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
             let mut promoted_operand = |ty, span| {
                 promoted.span = span;
                 promoted.local_decls[RETURN_PLACE] = LocalDecl::new(ty, span);
+                let _const = tcx.mk_const(ty::ConstS {
+                    ty,
+                    kind: ty::ConstKind::Unevaluated(ty::Unevaluated {
+                        def,
+                        substs: InternalSubsts::for_item(tcx, def.did, |param, _| {
+                            if let ty::GenericParamDefKind::Lifetime = param.kind {
+                                tcx.lifetimes.re_erased.into()
+                            } else {
+                                tcx.mk_param_from_def(param)
+                            }
+                        }),
+                        promoted: Some(promoted_id),
+                    }),
+                });
 
                 Operand::Constant(Box::new(Constant {
                     span,
                     user_ty: None,
-                    literal: tcx
-                        .mk_const(ty::ConstS {
-                            ty,
-                            val: ty::ConstKind::Unevaluated(ty::Unevaluated {
-                                def,
-                                substs: InternalSubsts::for_item(tcx, def.did, |param, _| {
-                                    if let ty::GenericParamDefKind::Lifetime = param.kind {
-                                        tcx.lifetimes.re_erased.into()
-                                    } else {
-                                        tcx.mk_param_from_def(param)
-                                    }
-                                }),
-                                promoted: Some(promoted_id),
-                            }),
-                        })
-                        .into(),
+                    literal: ConstantKind::from_const(_const, tcx),
                 }))
             };
             let (blocks, local_decls) = self.source.basic_blocks_and_local_decls_mut();
@@ -1054,11 +1047,9 @@ pub fn is_const_fn_in_array_repeat_expression<'tcx>(
         {
             if let Operand::Constant(box Constant { literal, .. }) = func {
                 if let ty::FnDef(def_id, _) = *literal.ty().kind() {
-                    if let Some((destination_place, _)) = destination {
-                        if destination_place == place {
-                            if ccx.tcx.is_const_fn(def_id) {
-                                return true;
-                            }
+                    if destination == place {
+                        if ccx.tcx.is_const_fn(def_id) {
+                            return true;
                         }
                     }
                 }

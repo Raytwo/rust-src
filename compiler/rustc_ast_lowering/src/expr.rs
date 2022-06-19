@@ -1,6 +1,6 @@
-use crate::{FnDeclKind, ImplTraitPosition};
-
+use super::ResolverAstLoweringExt;
 use super::{ImplTraitContext, LoweringContext, ParamMode, ParenthesizedGenericArgs};
+use crate::{FnDeclKind, ImplTraitPosition};
 
 use rustc_ast::attr;
 use rustc_ast::ptr::P as AstP;
@@ -11,7 +11,6 @@ use rustc_errors::struct_span_err;
 use rustc_hir as hir;
 use rustc_hir::def::Res;
 use rustc_hir::definitions::DefPathData;
-use rustc_span::hygiene::ExpnId;
 use rustc_span::source_map::{respan, DesugaringKind, Span, Spanned};
 use rustc_span::symbol::{sym, Ident};
 use rustc_span::DUMMY_SP;
@@ -41,7 +40,22 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 }
                 ExprKind::Tup(ref elts) => hir::ExprKind::Tup(self.lower_exprs(elts)),
                 ExprKind::Call(ref f, ref args) => {
-                    if let Some(legacy_args) = self.resolver.legacy_const_generic_args(f) {
+                    if e.attrs.get(0).map_or(false, |a| a.has_name(sym::rustc_box)) {
+                        if let [inner] = &args[..] && e.attrs.len() == 1 {
+                            let kind = hir::ExprKind::Box(self.lower_expr(&inner));
+                            let hir_id = self.lower_node_id(e.id);
+                            return hir::Expr { hir_id, kind, span: self.lower_span(e.span) };
+                        } else {
+                            self.sess
+                                .struct_span_err(
+                                    e.span,
+                                    "#[rustc_box] requires precisely one argument \
+                                    and no other attributes are allowed",
+                                )
+                                .emit();
+                            hir::ExprKind::Err
+                        }
+                    } else if let Some(legacy_args) = self.resolver.legacy_const_generic_args(f) {
                         self.lower_legacy_const_generics((**f).clone(), args.clone(), &legacy_args)
                     } else {
                         let f = self.lower_expr(f);
@@ -340,16 +354,10 @@ impl<'hir> LoweringContext<'_, 'hir> {
         for (idx, arg) in args.into_iter().enumerate() {
             if legacy_args_idx.contains(&idx) {
                 let parent_def_id = self.current_hir_id_owner;
-                let node_id = self.resolver.next_node_id();
+                let node_id = self.next_node_id();
 
                 // Add a definition for the in-band const def.
-                self.resolver.create_def(
-                    parent_def_id,
-                    node_id,
-                    DefPathData::AnonConst,
-                    ExpnId::root(),
-                    arg.span,
-                );
+                self.create_def(parent_def_id, node_id, DefPathData::AnonConst);
 
                 let anon_const = AnonConst { id: node_id, value: arg };
                 generic_args.push(AngleBracketedArg::Arg(GenericArg::Const(anon_const)));
@@ -562,7 +570,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         };
 
         // The closure/generator `FnDecl` takes a single (resume) argument of type `input_ty`.
-        let decl = self.arena.alloc(hir::FnDecl {
+        let fn_decl = self.arena.alloc(hir::FnDecl {
             inputs: arena_vec![self; input_ty],
             output,
             c_variadic: false,
@@ -583,7 +591,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         };
         let params = arena_vec![self; param];
 
-        let body_id = self.lower_body(move |this| {
+        let body = self.lower_body(move |this| {
             this.generator_kind = Some(hir::GeneratorKind::Async(async_gen_kind));
 
             let old_ctx = this.task_context;
@@ -594,13 +602,13 @@ impl<'hir> LoweringContext<'_, 'hir> {
         });
 
         // `static |_task_context| -> <ret_ty> { body }`:
-        let generator_kind = hir::ExprKind::Closure(
+        let generator_kind = hir::ExprKind::Closure {
             capture_clause,
-            decl,
-            body_id,
-            self.lower_span(span),
-            Some(hir::Movability::Static),
-        );
+            fn_decl,
+            body,
+            fn_decl_span: self.lower_span(span),
+            movability: Some(hir::Movability::Static),
+        };
         let generator = hir::Expr {
             hir_id: self.lower_node_id(closure_node_id),
             kind: generator_kind,
@@ -709,7 +717,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         };
 
         // `::std::task::Poll::Ready(result) => break result`
-        let loop_node_id = self.resolver.next_node_id();
+        let loop_node_id = self.next_node_id();
         let loop_hir_id = self.lower_node_id(loop_node_id);
         let ready_arm = {
             let x_ident = Ident::with_dummy_span(sym::result);
@@ -825,7 +833,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         body: &Expr,
         fn_decl_span: Span,
     ) -> hir::ExprKind<'hir> {
-        let (body_id, generator_option) = self.with_new_scopes(move |this| {
+        let (body, generator_option) = self.with_new_scopes(move |this| {
             let prev = this.current_item;
             this.current_item = Some(fn_decl_span);
             let mut generator_kind = None;
@@ -843,13 +851,13 @@ impl<'hir> LoweringContext<'_, 'hir> {
         // Lower outside new scope to preserve `is_in_loop_condition`.
         let fn_decl = self.lower_fn_decl(decl, None, FnDeclKind::Closure, None);
 
-        hir::ExprKind::Closure(
+        hir::ExprKind::Closure {
             capture_clause,
             fn_decl,
-            body_id,
-            self.lower_span(fn_decl_span),
-            generator_option,
-        )
+            body,
+            fn_decl_span: self.lower_span(fn_decl_span),
+            movability: generator_option,
+        }
     }
 
     fn generator_movability_for_fn(
@@ -896,7 +904,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
         let outer_decl =
             FnDecl { inputs: decl.inputs.clone(), output: FnRetTy::Default(fn_decl_span) };
 
-        let body_id = self.with_new_scopes(|this| {
+        let body = self.with_new_scopes(|this| {
             // FIXME(cramertj): allow `async` non-`move` closures with arguments.
             if capture_clause == CaptureBy::Ref && !decl.inputs.is_empty() {
                 struct_span_err!(
@@ -935,13 +943,13 @@ impl<'hir> LoweringContext<'_, 'hir> {
         // closure argument types.
         let fn_decl = self.lower_fn_decl(&outer_decl, None, FnDeclKind::Closure, None);
 
-        hir::ExprKind::Closure(
+        hir::ExprKind::Closure {
             capture_clause,
             fn_decl,
-            body_id,
-            self.lower_span(fn_decl_span),
-            None,
-        )
+            body,
+            fn_decl_span: self.lower_span(fn_decl_span),
+            movability: None,
+        }
     }
 
     /// Destructure the LHS of complex assignments.
@@ -1153,7 +1161,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                             .span_suggestion(
                                 e.span,
                                 "consider removing the trailing pattern",
-                                String::new(),
+                                "",
                                 rustc_errors::Applicability::MachineApplicable,
                             )
                             .emit();

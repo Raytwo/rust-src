@@ -67,9 +67,9 @@ impl<'tcx> LateLintPass<'tcx> for MapClone {
             if method.ident.name == sym::map;
             let ty = cx.typeck_results().expr_ty(&args[0]);
             if is_type_diagnostic_item(cx, ty, sym::Option) || is_trait_method(cx, e, sym::Iterator);
-            if let hir::ExprKind::Closure(_, _, body_id, _, _) = args[1].kind;
+            if let hir::ExprKind::Closure { body, .. } = args[1].kind;
             then {
-                let closure_body = cx.tcx.hir().body(body_id);
+                let closure_body = cx.tcx.hir().body(body);
                 let closure_expr = peel_blocks(&closure_body.value);
                 match closure_body.params[0].pat.kind {
                     hir::PatKind::Ref(inner, hir::Mutability::Not) => if let hir::PatKind::Binding(
@@ -144,7 +144,7 @@ impl MapClone {
     fn lint_explicit_closure(&self, cx: &LateContext<'_>, replace: Span, root: Span, is_copy: bool) {
         let mut applicability = Applicability::MachineApplicable;
 
-        let (message, sugg_method) = if is_copy && meets_msrv(self.msrv.as_ref(), &msrvs::ITERATOR_COPIED) {
+        let (message, sugg_method) = if is_copy && meets_msrv(self.msrv, msrvs::ITERATOR_COPIED) {
             ("you are using an explicit closure for copying elements", "copied")
         } else {
             ("you are using an explicit closure for cloning elements", "cloned")

@@ -36,12 +36,14 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust
-    /// // Bad: unnecessary lifetime annotations
+    /// // Unnecessary lifetime annotations
     /// fn in_and_out<'a>(x: &'a u8, y: u8) -> &'a u8 {
     ///     x
     /// }
+    /// ```
     ///
-    /// // Good
+    /// Use instead:
+    /// ```rust
     /// fn elided(x: &u8, y: u8) -> &u8 {
     ///     x
     /// }
@@ -65,12 +67,14 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust
-    /// // Bad: unnecessary lifetimes
+    /// // unnecessary lifetimes
     /// fn unused_lifetime<'a>(x: u8) {
     ///     // ..
     /// }
+    /// ```
     ///
-    /// // Good
+    /// Use instead:
+    /// ```rust
     /// fn no_lifetime(x: u8) {
     ///     // ...
     /// }
@@ -371,7 +375,7 @@ impl<'a, 'tcx> RefVisitor<'a, 'tcx> {
         if let Some(ref lt) = *lifetime {
             if lt.name == LifetimeName::Static {
                 self.lts.push(RefLt::Static);
-            } else if let LifetimeName::Param(ParamName::Fresh(_)) = lt.name {
+            } else if let LifetimeName::Param(_, ParamName::Fresh) = lt.name {
                 // Fresh lifetimes generated should be ignored.
             } else if lt.is_elided() {
                 self.lts.push(RefLt::Unnamed);

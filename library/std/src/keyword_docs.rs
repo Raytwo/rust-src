@@ -70,7 +70,7 @@ mod as_keyword {}
 /// A break expression is normally associated with the innermost loop enclosing the
 /// `break` but a label can be used to specify which enclosing loop is affected.
 ///
-///```rust
+/// ```rust
 /// 'outer: for i in 1..=5 {
 ///     println!("outer iteration (i): {i}");
 ///
@@ -87,7 +87,7 @@ mod as_keyword {}
 ///     }
 /// }
 /// println!("Bye.");
-///```
+/// ```
 ///
 /// When associated with `loop`, a break expression may be used to return a value from that loop.
 /// This is only valid with `loop` and not with any other type of loop.
@@ -194,7 +194,7 @@ mod const_keyword {}
 /// When `continue` is encountered, the current iteration is terminated, returning control to the
 /// loop head, typically continuing with the next iteration.
 ///
-///```rust
+/// ```rust
 /// // Printing odd numbers by skipping even ones
 /// for number in 1..=10 {
 ///     if number % 2 == 0 {
@@ -202,12 +202,12 @@ mod const_keyword {}
 ///     }
 ///     println!("{number}");
 /// }
-///```
+/// ```
 ///
 /// Like `break`, `continue` is normally associated with the innermost enclosing loop, but labels
 /// may be used to specify the affected loop.
 ///
-///```rust
+/// ```rust
 /// // Print Odd numbers under 30 with unit <= 5
 /// 'tens: for ten in 0..3 {
 ///     '_units: for unit in 0..=9 {
@@ -220,7 +220,7 @@ mod const_keyword {}
 ///         println!("{}", ten * 10 + unit);
 ///     }
 /// }
-///```
+/// ```
 ///
 /// See [continue expressions] from the reference for more details.
 ///
@@ -2167,7 +2167,7 @@ mod use_keyword {}
 /// is missing: the `'b` lifetime is not known to live at least as long as `'a`
 /// which means this function cannot ensure it always returns a valid reference:
 ///
-/// ```rust,compile_fail,E0623
+/// ```rust,compile_fail
 /// fn select<'a, 'b>(s1: &'a str, s2: &'b str, second: bool) -> &'a str
 /// {
 ///     if second { s2 } else { s1 }
@@ -2199,7 +2199,7 @@ mod use_keyword {}
 /// pub enum Cow<'a, B>
 /// where
 ///     B: 'a + ToOwned + ?Sized,
-///  {
+/// {
 ///     Borrowed(&'a B),
 ///     Owned(<B as ToOwned>::Owned),
 /// }
@@ -2257,7 +2257,7 @@ mod await_keyword {}
 /// `dyn` is a prefix of a [trait object]'s type.
 ///
 /// The `dyn` keyword is used to highlight that calls to methods on the associated `Trait`
-/// are dynamically dispatched. To use the trait this way, it must be 'object safe'.
+/// are [dynamically dispatched]. To use the trait this way, it must be 'object safe'.
 ///
 /// Unlike generic parameters or `impl Trait`, the compiler does not know the concrete type that
 /// is being passed. That is, the type has been [erased].
@@ -2281,6 +2281,7 @@ mod await_keyword {}
 /// the method won't be duplicated for each concrete type.
 ///
 /// [trait object]: ../book/ch17-02-trait-objects.html
+/// [dynamically dispatched]: https://en.wikipedia.org/wiki/Dynamic_dispatch
 /// [ref-trait-obj]: ../reference/types/trait-object.html
 /// [ref-obj-safety]: ../reference/items/traits.html#object-safety
 /// [erased]: https://en.wikipedia.org/wiki/Type_erasure

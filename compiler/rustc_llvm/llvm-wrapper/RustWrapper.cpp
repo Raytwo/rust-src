@@ -672,8 +672,18 @@ extern "C" void LLVMRustAddModuleFlag(
   unwrap(M)->addModuleFlag(MergeBehavior, Name, Value);
 }
 
+extern "C" bool LLVMRustHasModuleFlag(LLVMModuleRef M, const char *Name,
+                                      size_t Len) {
+  return unwrap(M)->getModuleFlag(StringRef(Name, Len)) != nullptr;
+}
+
 extern "C" LLVMValueRef LLVMRustMetadataAsValue(LLVMContextRef C, LLVMMetadataRef MD) {
   return wrap(MetadataAsValue::get(*unwrap(C), unwrap(MD)));
+}
+
+extern "C" void LLVMRustGlobalAddMetadata(
+    LLVMValueRef Global, unsigned Kind, LLVMMetadataRef MD) {
+  unwrap<GlobalObject>(Global)->addMetadata(Kind, *unwrap<MDNode>(MD));
 }
 
 extern "C" LLVMRustDIBuilderRef LLVMRustDIBuilderCreate(LLVMModuleRef M) {
@@ -1542,11 +1552,19 @@ extern "C" bool LLVMRustConstInt128Get(LLVMValueRef CV, bool sext, uint64_t *hig
     auto C = unwrap<llvm::ConstantInt>(CV);
     if (C->getBitWidth() > 128) { return false; }
     APInt AP;
+#if LLVM_VERSION_GE(15, 0)
+    if (sext) {
+        AP = C->getValue().sext(128);
+    } else {
+        AP = C->getValue().zext(128);
+    }
+#else
     if (sext) {
         AP = C->getValue().sextOrSelf(128);
     } else {
         AP = C->getValue().zextOrSelf(128);
     }
+#endif
     *low = AP.getLoBits(64).getZExtValue();
     *high = AP.getHiBits(64).getZExtValue();
     return true;

@@ -24,11 +24,11 @@ where
 
 // After applying suggestion for `foo`:
 fn bar<G, T>(g: G, dest: &mut T) -> impl FnOnce() + '_
-//~^ ERROR the parameter type `G` may not live long enough
 where
     G: Get<T>,
 {
     move || {
+        //~^ ERROR the parameter type `G` may not live long enough
         *dest = g.get();
     }
 }
@@ -46,11 +46,11 @@ where
 
 // After applying suggestion for `baz`:
 fn qux<'a, G: 'a, T>(g: G, dest: &mut T) -> impl FnOnce() + '_
-//~^ ERROR the parameter type `G` may not live long enough
 where
     G: Get<T>,
 {
     move || {
+        //~^ ERROR the parameter type `G` may not live long enough
         *dest = g.get();
     }
 }
@@ -58,8 +58,8 @@ where
 // Same as above, but show that we pay attention to lifetime names from parent item
 impl<'a> Foo {
     fn qux<'b, G: Get<T> + 'b, T>(g: G, dest: &mut T) -> impl FnOnce() + '_ {
-        //~^ ERROR the parameter type `G` may not live long enough
         move || {
+            //~^ ERROR the parameter type `G` may not live long enough
             *dest = g.get();
         }
     }
@@ -67,22 +67,23 @@ impl<'a> Foo {
 
 // After applying suggestion for `qux`:
 fn bat<'a, G: 'a, T>(g: G, dest: &mut T) -> impl FnOnce() + '_ + 'a
-//~^ ERROR explicit lifetime required in the type of `dest`
 where
     G: Get<T>,
 {
     move || {
+        //~^ ERROR the parameter type `G` may not live long enough
+        //~| ERROR explicit lifetime required
         *dest = g.get();
     }
 }
 
 // Potential incorrect attempt:
 fn bak<'a, G, T>(g: G, dest: &'a mut T) -> impl FnOnce() + 'a
-//~^ ERROR the parameter type `G` may not live long enough
 where
     G: Get<T>,
 {
     move || {
+        //~^ ERROR the parameter type `G` may not live long enough
         *dest = g.get();
     }
 }

@@ -644,9 +644,6 @@ fn test_debugging_options_tracking_hash() {
     // Make sure that changing an [UNTRACKED] option leaves the hash unchanged.
     // This list is in alphabetical order.
     untracked!(assert_incr_state, Some(String::from("loaded")));
-    untracked!(ast_json, true);
-    untracked!(ast_json_noexpand, true);
-    untracked!(borrowck, String::from("other"));
     untracked!(deduplicate_diagnostics, false);
     untracked!(dep_tasks, true);
     untracked!(dlltool, Some(PathBuf::from("custom_dlltool.exe")));
@@ -792,6 +789,7 @@ fn test_debugging_options_tracking_hash() {
     tracked!(thinlto, Some(true));
     tracked!(thir_unsafeck, true);
     tracked!(tls_model, Some(TlsModel::GeneralDynamic));
+    tracked!(translate_remapped_path_to_local_path, false);
     tracked!(trap_unreachable, Some(false));
     tracked!(treat_err_as_bug, NonZeroUsize::new(1));
     tracked!(tune_cpu, Some(String::from("abc")));
@@ -799,6 +797,7 @@ fn test_debugging_options_tracking_hash() {
     tracked!(unleash_the_miri_inside_of_you, true);
     tracked!(use_ctors_section, Some(true));
     tracked!(verify_llvm_ir, true);
+    tracked!(virtual_function_elimination, true);
     tracked!(wasi_exec_model, Some(WasiExecModel::Reactor));
 
     macro_rules! tracked_no_crate_hash {

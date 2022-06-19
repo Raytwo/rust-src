@@ -8,7 +8,7 @@ fn test2<'a>() {
     // Here: the type `dyn Bar<&'a u32>` references `'a`,
     // and so it does not outlive `'static`.
     test1::<dyn Bar<&'a u32>, _>();
-    //~^ ERROR the type `(dyn Bar<&'a u32> + 'static)` does not fulfill the required lifetime
+    //~^ ERROR lifetime may not live long enough
 }
 
 fn main() { }

@@ -1,5 +1,5 @@
 use rustc_data_structures::fx::FxHashSet;
-use rustc_middle::ty::fold::{TypeFoldable, TypeVisitor};
+use rustc_middle::ty::fold::{TypeFoldable, TypeSuperFoldable, TypeVisitor};
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::source_map::Span;
 use std::ops::ControlFlow;
@@ -80,7 +80,7 @@ impl<'tcx> TypeVisitor<'tcx> for ParameterCollector {
     }
 
     fn visit_const(&mut self, c: ty::Const<'tcx>) -> ControlFlow<Self::BreakTy> {
-        match c.val() {
+        match c.kind() {
             ty::ConstKind::Unevaluated(..) if !self.include_nonconstraining => {
                 // Constant expressions are not injective
                 return c.ty().visit_with(self);

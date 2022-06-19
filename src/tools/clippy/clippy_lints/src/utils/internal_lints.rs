@@ -89,12 +89,11 @@ declare_clippy_lint! {
     /// warning/error messages.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// cx.span_lint(LINT_NAME, "message");
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// utils::span_lint(cx, LINT_NAME, "message");
     /// ```
@@ -112,12 +111,11 @@ declare_clippy_lint! {
     /// `cx.outer_expn_data()` is faster and more concise.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// expr.span.ctxt().outer().expn_data()
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// expr.span.ctxt().outer_expn_data()
     /// ```
@@ -135,7 +133,6 @@ declare_clippy_lint! {
     /// ICE in large quantities can damage your teeth
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// 🍦🍦🍦🍦🍦
     /// ```
@@ -153,12 +150,11 @@ declare_clippy_lint! {
     /// Indicates that the lint is not finished.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// declare_lint! { pub COOL_LINT, nursery, "default lint description" }
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// declare_lint! { pub COOL_LINT, nursery, "a great new lint" }
     /// ```
@@ -183,7 +179,6 @@ declare_clippy_lint! {
     /// convenient, readable and less error prone.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |diag| {
     ///     diag.span_suggestion(
@@ -207,7 +202,7 @@ declare_clippy_lint! {
     /// });
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// span_lint_and_sugg(
     ///     cx,
@@ -237,12 +232,11 @@ declare_clippy_lint! {
     /// `utils::is_type_diagnostic_item()` does not require hardcoded paths.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// utils::match_type(cx, ty, &paths::VEC)
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// utils::is_type_diagnostic_item(cx, ty, sym::Vec)
     /// ```
@@ -273,12 +267,11 @@ declare_clippy_lint! {
     /// It's faster and easier to use the symbol constant.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// let _ = sym!(f32);
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// let _ = sym::f32;
     /// ```
@@ -295,12 +288,11 @@ declare_clippy_lint! {
     /// It's faster use symbols directly instead of strings.
     ///
     /// ### Example
-    /// Bad:
     /// ```rust,ignore
     /// symbol.as_str() == "clippy";
     /// ```
     ///
-    /// Good:
+    /// Use instead:
     /// ```rust,ignore
     /// symbol == sym::clippy;
     /// ```
@@ -422,7 +414,7 @@ impl<'tcx> LateLintPass<'tcx> for LintWithoutLintPass {
             }
         } else if let Some(macro_call) = root_macro_call_first_node(cx, item) {
             if !matches!(
-                &*cx.tcx.item_name(macro_call.def_id).as_str(),
+                cx.tcx.item_name(macro_call.def_id).as_str(),
                 "impl_lint_pass" | "declare_lint_pass"
             ) {
                 return;
@@ -504,7 +496,7 @@ fn check_invalid_clippy_version_attribute(cx: &LateContext<'_>, item: &'_ Item<'
             return;
         }
 
-        if RustcVersion::parse(&*value.as_str()).is_err() {
+        if RustcVersion::parse(value.as_str()).is_err() {
             span_lint_and_help(
                 cx,
                 INVALID_CLIPPY_VERSION_ATTRIBUTE,
@@ -595,7 +587,7 @@ impl<'tcx> LateLintPass<'tcx> for CompilerLintFunctions {
         if_chain! {
             if let ExprKind::MethodCall(path, [self_arg, ..], _) = &expr.kind;
             let fn_name = path.ident;
-            if let Some(sugg) = self.map.get(&*fn_name.as_str());
+            if let Some(sugg) = self.map.get(fn_name.as_str());
             let ty = cx.typeck_results().expr_ty(self_arg).peel_refs();
             if match_type(cx, ty, &paths::EARLY_CONTEXT)
                 || match_type(cx, ty, &paths::LATE_CONTEXT);
@@ -672,14 +664,14 @@ impl<'tcx> LateLintPass<'tcx> for CollapsibleCalls {
             if let ExprKind::Call(func, and_then_args) = expr.kind;
             if is_expr_path_def_path(cx, func, &["clippy_utils", "diagnostics", "span_lint_and_then"]);
             if and_then_args.len() == 5;
-            if let ExprKind::Closure(_, _, body_id, _, _) = &and_then_args[4].kind;
-            let body = cx.tcx.hir().body(*body_id);
+            if let ExprKind::Closure { body, .. } = &and_then_args[4].kind;
+            let body = cx.tcx.hir().body(*body);
             let only_expr = peel_blocks_with_stmt(&body.value);
             if let ExprKind::MethodCall(ps, span_call_args, _) = &only_expr.kind;
             then {
                 let and_then_snippets = get_and_then_snippets(cx, and_then_args);
                 let mut sle = SpanlessEq::new(cx).deny_side_effects();
-                match &*ps.ident.as_str() {
+                match ps.ident.as_str() {
                     "span_suggestion" if sle.eq_expr(&and_then_args[2], &span_call_args[1]) => {
                         suggest_suggestion(cx, expr, &and_then_snippets, &span_suggestion_snippets(cx, span_call_args));
                     },

@@ -30,6 +30,7 @@ fn main() {
         || target.contains("espidf")
         || target.contains("solid")
         || target.contains("switch")
+        || target.contains("nintendo-3ds")
     {
         // These platforms don't have any special requirements.
     } else {

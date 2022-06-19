@@ -10,8 +10,9 @@ use rustc_errors::{Applicability, Diagnostic, DiagnosticBuilder, ErrorGuaranteed
 use rustc_feature::BUILTIN_ATTRIBUTES;
 use rustc_hir::def::Namespace::{self, *};
 use rustc_hir::def::{self, CtorKind, CtorOf, DefKind, NonMacroAttrKind, PerNS};
-use rustc_hir::def_id::{DefId, CRATE_DEF_ID, LOCAL_CRATE};
+use rustc_hir::def_id::{DefId, LocalDefId, CRATE_DEF_ID, LOCAL_CRATE};
 use rustc_hir::PrimTy;
+use rustc_index::vec::IndexVec;
 use rustc_middle::bug;
 use rustc_middle::ty::DefIdTree;
 use rustc_session::lint::builtin::ABSOLUTE_PATHS_NOT_STARTING_WITH_CRATE;
@@ -130,8 +131,8 @@ impl<'a> Resolver<'a> {
             };
             if !candidates.is_empty() {
                 show_candidates(
-                    &self.definitions,
-                    self.session,
+                    &self.session,
+                    &self.source_span,
                     &mut err,
                     span,
                     &candidates,
@@ -271,7 +272,7 @@ impl<'a> Resolver<'a> {
                 err.tool_only_span_suggestion(
                     import.use_span_with_attributes,
                     "remove unnecessary import",
-                    String::new(),
+                    "",
                     Applicability::MaybeIncorrect,
                 );
             }
@@ -396,19 +397,14 @@ impl<'a> Resolver<'a> {
         // previous imports.
         if found_closing_brace {
             if let Some(span) = extend_span_to_previous_binding(self.session, span) {
-                err.tool_only_span_suggestion(
-                    span,
-                    message,
-                    String::new(),
-                    Applicability::MaybeIncorrect,
-                );
+                err.tool_only_span_suggestion(span, message, "", Applicability::MaybeIncorrect);
             } else {
                 // Remove the entire line if we cannot extend the span back, this indicates an
                 // `issue_52891::{self}` case.
                 err.span_suggestion(
                     import.use_span_with_attributes,
                     message,
-                    String::new(),
+                    "",
                     Applicability::MaybeIncorrect,
                 );
             }
@@ -416,7 +412,7 @@ impl<'a> Resolver<'a> {
             return;
         }
 
-        err.span_suggestion(span, message, String::new(), Applicability::MachineApplicable);
+        err.span_suggestion(span, message, "", Applicability::MachineApplicable);
     }
 
     pub(crate) fn lint_if_path_starts_with_module(
@@ -698,8 +694,8 @@ impl<'a> Resolver<'a> {
                         err.span_help(span, &help_msg);
                     }
                     show_candidates(
-                        &self.definitions,
-                        self.session,
+                        &self.session,
+                        &self.source_span,
                         &mut err,
                         Some(span),
                         &import_suggestions,
@@ -763,7 +759,7 @@ impl<'a> Resolver<'a> {
                         err.span_suggestion(
                             span,
                             "try using similarly named label",
-                            ident.name.to_string(),
+                            ident.name,
                             Applicability::MaybeIncorrect,
                         );
                     }
@@ -796,7 +792,7 @@ impl<'a> Resolver<'a> {
                     err.span_suggestion(
                         span,
                         "consider importing the module directly",
-                        "".to_string(),
+                        "",
                         Applicability::MachineApplicable,
                     );
 
@@ -1007,7 +1003,7 @@ impl<'a> Resolver<'a> {
                         err.span_suggestion(
                             span,
                             "try using similarly named label",
-                            ident.name.to_string(),
+                            ident.name,
                             Applicability::MaybeIncorrect,
                         );
                     }
@@ -1479,8 +1475,8 @@ impl<'a> Resolver<'a> {
         let import_suggestions =
             self.lookup_import_candidates(ident, Namespace::MacroNS, parent_scope, is_expected);
         show_candidates(
-            &self.definitions,
-            self.session,
+            &self.session,
+            &self.source_span,
             err,
             None,
             &import_suggestions,
@@ -1618,12 +1614,7 @@ impl<'a> Resolver<'a> {
                 format!("maybe you meant this {}", suggestion.res.descr())
             }
         };
-        err.span_suggestion(
-            span,
-            &msg,
-            suggestion.candidate.to_string(),
-            Applicability::MaybeIncorrect,
-        );
+        err.span_suggestion(span, &msg, suggestion.candidate, Applicability::MaybeIncorrect);
         true
     }
 
@@ -1839,9 +1830,18 @@ impl<'a> Resolver<'a> {
                     )),
                 )
             } else if self.session.edition() == Edition::Edition2015 {
-                (format!("maybe a missing crate `{}`?", ident), None)
+                (
+                    format!("maybe a missing crate `{ident}`?"),
+                    Some((
+                        vec![],
+                        format!(
+                            "consider adding `extern crate {ident}` to use the `{ident}` crate"
+                        ),
+                        Applicability::MaybeIncorrect,
+                    )),
+                )
             } else {
-                (format!("could not find `{}` in the crate root", ident), None)
+                (format!("could not find `{ident}` in the crate root"), None)
             }
         } else if i > 0 {
             let parent = path[i - 1].ident.name;
@@ -1852,7 +1852,7 @@ impl<'a> Resolver<'a> {
                     "the list of imported crates".to_owned()
                 }
                 kw::PathRoot | kw::Crate => "the crate root".to_owned(),
-                _ => format!("`{}`", parent),
+                _ => format!("`{parent}`"),
             };
 
             let mut msg = format!("could not find `{}` in {}", ident, parent);
@@ -2445,8 +2445,8 @@ enum IsPattern {
 /// entities with that name in all crates. This method allows outputting the
 /// results of this search in a programmer-friendly way
 fn show_candidates(
-    definitions: &rustc_hir::definitions::Definitions,
     session: &Session,
+    source_span: &IndexVec<LocalDefId, Span>,
     err: &mut Diagnostic,
     // This is `None` if all placement locations are inside expansions
     use_placement_span: Option<Span>,
@@ -2526,7 +2526,7 @@ fn show_candidates(
                 err.span_suggestion_verbose(
                     first.ident.span.until(last.ident.span),
                     &format!("if you import `{}`, refer to it directly", last.ident),
-                    String::new(),
+                    "",
                     Applicability::Unspecified,
                 );
             }
@@ -2556,7 +2556,7 @@ fn show_candidates(
             );
 
             if let Some(local_def_id) = def_id.and_then(|did| did.as_local()) {
-                let span = definitions.def_span(local_def_id);
+                let span = source_span[local_def_id];
                 let span = session.source_map().guess_head_span(span);
                 let mut multi_span = MultiSpan::from_span(span);
                 multi_span.push_span_label(span, "not accessible".to_string());
@@ -2585,7 +2585,7 @@ fn show_candidates(
             let mut spans = Vec::new();
             for (name, _, def_id, _) in &inaccessible_path_strings {
                 if let Some(local_def_id) = def_id.and_then(|did| did.as_local()) {
-                    let span = definitions.def_span(local_def_id);
+                    let span = source_span[local_def_id];
                     let span = session.source_map().guess_head_span(span);
                     spans.push((name, span));
                 } else {

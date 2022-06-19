@@ -15,7 +15,7 @@ use rustc_middle::ty::layout::{
 use rustc_middle::ty::{
     self, query::TyCtxtAt, subst::SubstsRef, ParamEnv, Ty, TyCtxt, TypeFoldable,
 };
-use rustc_mir_dataflow::storage::AlwaysLiveLocals;
+use rustc_mir_dataflow::storage::always_live_locals;
 use rustc_query_system::ich::StableHashingContext;
 use rustc_session::Limit;
 use rustc_span::{Pos, Span};
@@ -105,7 +105,7 @@ pub struct Frame<'mir, 'tcx, Tag: Provenance = AllocId, Extra = ()> {
 
     /// The location where the result of the current stack frame should be written to,
     /// and its layout in the caller.
-    pub return_place: Option<PlaceTy<'tcx, Tag>>,
+    pub return_place: PlaceTy<'tcx, Tag>,
 
     /// The list of locals for this stack frame, stored in order as
     /// `[return_ptr, arguments..., variables..., temporaries...]`.
@@ -126,7 +126,9 @@ pub struct Frame<'mir, 'tcx, Tag: Provenance = AllocId, Extra = ()> {
     /// this frame (can happen e.g. during frame initialization, and during unwinding on
     /// frames without cleanup code).
     /// We basically abuse `Result` as `Either`.
-    pub(super) loc: Result<mir::Location, Span>,
+    ///
+    /// Needs to be public because ConstProp does unspeakable things to it.
+    pub loc: Result<mir::Location, Span>,
 }
 
 /// What we store about a frame in an interpreter backtrace.
@@ -320,6 +322,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> LayoutOfHelpers<'tcx> for InterpC
 
     #[inline]
     fn layout_tcx_at_span(&self) -> Span {
+        // Using the cheap root span for performance.
         self.tcx.span
     }
 
@@ -520,13 +523,13 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         frame
             .instance
             .try_subst_mir_and_normalize_erasing_regions(*self.tcx, self.param_env, value)
-            .or_else(|e| {
+            .map_err(|e| {
                 self.tcx.sess.delay_span_bug(
                     self.cur_span(),
                     format!("failed to normalize {}", e.get_type_for_failure()).as_str(),
                 );
 
-                Err(InterpError::InvalidProgram(InvalidProgramInfo::TooGeneric))
+                InterpError::InvalidProgram(InvalidProgramInfo::TooGeneric)
             })
     }
 
@@ -676,7 +679,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         &mut self,
         instance: ty::Instance<'tcx>,
         body: &'mir mir::Body<'tcx>,
-        return_place: Option<&PlaceTy<'tcx, M::PointerTag>>,
+        return_place: &PlaceTy<'tcx, M::PointerTag>,
         return_to_block: StackPopCleanup,
     ) -> InterpResult<'tcx> {
         trace!("body: {:#?}", body);
@@ -685,7 +688,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             body,
             loc: Err(body.span), // Span used for errors caused during preamble.
             return_to_block,
-            return_place: return_place.copied(),
+            return_place: *return_place,
             // empty local array, we fill it in below, after we are inside the stack frame and
             // all methods actually know about the frame
             locals: IndexVec::new(),
@@ -715,7 +718,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
 
         // Now mark those locals as dead that we do not want to initialize
         // Mark locals that use `Storage*` annotations as dead on function entry.
-        let always_live = AlwaysLiveLocals::new(self.body());
+        let always_live = always_live_locals(self.body());
         for local in locals.indices() {
             if !always_live.contains(local) {
                 locals[local].value = LocalValue::Dead;
@@ -807,14 +810,9 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             self.stack_mut().pop().expect("tried to pop a stack frame, but there were none");
 
         if !unwinding {
-            // Copy the return value to the caller's stack frame.
-            if let Some(ref return_place) = frame.return_place {
-                let op = self.access_local(&frame, mir::RETURN_PLACE, None)?;
-                self.copy_op_transmute(&op, return_place)?;
-                trace!("{:?}", self.dump_place(**return_place));
-            } else {
-                throw_ub!(Unreachable);
-            }
+            let op = self.access_local(&frame, mir::RETURN_PLACE, None)?;
+            self.copy_op_transmute(&op, &frame.return_place)?;
+            trace!("{:?}", self.dump_place(*frame.return_place));
         }
 
         let return_to_block = frame.return_to_block;
@@ -928,7 +926,8 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
             self.param_env
         };
         let param_env = param_env.with_const();
-        let val = self.tcx.eval_to_allocation_raw(param_env.and(gid))?;
+        // Use a precise span for better cycle errors.
+        let val = self.tcx.at(self.cur_span()).eval_to_allocation_raw(param_env.and(gid))?;
         self.raw_const_to_mplace(val)
     }
 
@@ -1014,11 +1013,7 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> std::fmt::Debug
                     }
                 }
 
-                write!(
-                    fmt,
-                    ": {:?}",
-                    self.ecx.dump_allocs(allocs.into_iter().filter_map(|x| x).collect())
-                )
+                write!(fmt, ": {:?}", self.ecx.dump_allocs(allocs.into_iter().flatten().collect()))
             }
             Place::Ptr(mplace) => match mplace.ptr.provenance.and_then(Provenance::get_alloc_id) {
                 Some(alloc_id) => write!(
@@ -1055,7 +1050,7 @@ where
         body.hash_stable(hcx, hasher);
         instance.hash_stable(hcx, hasher);
         return_to_block.hash_stable(hcx, hasher);
-        return_place.as_ref().map(|r| &**r).hash_stable(hcx, hasher);
+        return_place.hash_stable(hcx, hasher);
         locals.hash_stable(hcx, hasher);
         loc.hash_stable(hcx, hasher);
         extra.hash_stable(hcx, hasher);

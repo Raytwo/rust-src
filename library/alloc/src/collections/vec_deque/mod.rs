@@ -453,6 +453,25 @@ impl<T, A: Allocator> VecDeque<T, A> {
         }
     }
 
+    /// Writes all values from `iter` to `dst`.
+    ///
+    /// # Safety
+    ///
+    /// Assumes no wrapping around happens.
+    /// Assumes capacity is sufficient.
+    #[inline]
+    unsafe fn write_iter(
+        &mut self,
+        dst: usize,
+        iter: impl Iterator<Item = T>,
+        written: &mut usize,
+    ) {
+        iter.enumerate().for_each(|(i, element)| unsafe {
+            self.buffer_write(dst + i, element);
+            *written += 1;
+        });
+    }
+
     /// Frobs the head and tail sections around to handle the fact that we
     /// just reallocated. Unsafe because it trusts old_capacity.
     #[inline]
@@ -1013,7 +1032,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn iter(&self) -> Iter<'_, T> {
-        Iter { tail: self.tail, head: self.head, ring: unsafe { self.buffer_as_slice() } }
+        Iter::new(unsafe { self.buffer_as_slice() }, self.tail, self.head)
     }
 
     /// Returns a front-to-back iterator that returns mutable references.
@@ -1192,12 +1211,8 @@ impl<T, A: Allocator> VecDeque<T, A> {
         R: RangeBounds<usize>,
     {
         let (tail, head) = self.range_tail_head(range);
-        Iter {
-            tail,
-            head,
-            // The shared reference we have in &self is maintained in the '_ of Iter.
-            ring: unsafe { self.buffer_as_slice() },
-        }
+        // The shared reference we have in &self is maintained in the '_ of Iter.
+        Iter::new(unsafe { self.buffer_as_slice() }, tail, head)
     }
 
     /// Creates an iterator that covers the specified mutable range in the deque.
@@ -1313,16 +1328,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
         self.head = drain_tail;
 
         let deque = NonNull::from(&mut *self);
-        let iter = Iter {
-            tail: drain_tail,
-            head: drain_head,
+        unsafe {
             // Crucially, we only create shared references from `self` here and read from
             // it.  We do not write to `self` nor reborrow to a mutable reference.
             // Hence the raw pointer we created above, for `deque`, remains valid.
-            ring: unsafe { self.buffer_as_slice() },
-        };
+            let ring = self.buffer_as_slice();
+            let iter = Iter::new(ring, drain_tail, drain_head);
 
-        unsafe { Drain::new(drain_head, head, iter, deque) }
+            Drain::new(drain_head, head, iter, deque)
+        }
     }
 
     /// Clears the deque, removing all values.

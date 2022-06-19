@@ -29,8 +29,7 @@ declare_clippy_lint! {
     /// pub fn foo<T>(t: T) where T: Copy, T: Clone {}
     /// ```
     ///
-    /// Could be written as:
-    ///
+    /// Use instead:
     /// ```rust
     /// pub fn foo<T>(t: T) where T: Copy + Clone {}
     /// ```
@@ -54,14 +53,14 @@ declare_clippy_lint! {
     /// fn func<T: Clone + Default>(arg: T) where T: Clone + Default {}
     /// ```
     ///
-    /// Could be written as:
-    ///
+    /// Use instead:
     /// ```rust
+    /// # mod hidden {
     /// fn func<T: Clone + Default>(arg: T) {}
-    /// ```
-    /// or
+    /// # }
     ///
-    /// ```rust
+    /// // or
+    ///
     /// fn func<T>(arg: T) where T: Clone + Default {}
     /// ```
     #[clippy::version = "1.47.0"]

@@ -12,7 +12,7 @@ use rustc_data_structures::sso::SsoHashMap;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_infer::traits::Normalized;
 use rustc_middle::mir;
-use rustc_middle::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeFolder};
+use rustc_middle::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitor};
 
@@ -100,7 +100,7 @@ impl<'cx, 'tcx> AtExt<'tcx> for At<'cx, 'tcx> {
     }
 }
 
-/// Visitor to find the maximum escaping bound var
+// Visitor to find the maximum escaping bound var
 struct MaxEscapingBoundVarVisitor {
     // The index which would count as escaping
     outer_index: ty::DebruijnIndex,
@@ -141,7 +141,7 @@ impl<'tcx> TypeVisitor<'tcx> for MaxEscapingBoundVarVisitor {
     }
 
     fn visit_const(&mut self, ct: ty::Const<'tcx>) -> ControlFlow<Self::BreakTy> {
-        match ct.val() {
+        match ct.kind() {
             ty::ConstKind::Bound(debruijn, _) if debruijn >= self.outer_index => {
                 self.escaping =
                     self.escaping.max(debruijn.as_usize() - self.outer_index.as_usize());
@@ -205,7 +205,7 @@ impl<'cx, 'tcx> FallibleTypeFolder<'tcx> for QueryNormalizer<'cx, 'tcx> {
                     Reveal::UserFacing => ty.try_super_fold_with(self),
 
                     Reveal::All => {
-                        let substs = substs.try_super_fold_with(self)?;
+                        let substs = substs.try_fold_with(self)?;
                         let recursion_limit = self.tcx().recursion_limit();
                         if !recursion_limit.value_within_limit(self.anon_depth) {
                             let obligation = Obligation::with_depth(
@@ -242,7 +242,7 @@ impl<'cx, 'tcx> FallibleTypeFolder<'tcx> for QueryNormalizer<'cx, 'tcx> {
                 // we don't need to replace them with placeholders (see branch below).
 
                 let tcx = self.infcx.tcx;
-                let data = data.try_super_fold_with(self)?;
+                let data = data.try_fold_with(self)?;
 
                 let mut orig_values = OriginalQueryValues::default();
                 // HACK(matthewjasper) `'static` is special-cased in selection,
@@ -281,7 +281,7 @@ impl<'cx, 'tcx> FallibleTypeFolder<'tcx> for QueryNormalizer<'cx, 'tcx> {
                         &mut self.universes,
                         data,
                     );
-                let data = data.try_super_fold_with(self)?;
+                let data = data.try_fold_with(self)?;
 
                 let mut orig_values = OriginalQueryValues::default();
                 // HACK(matthewjasper) `'static` is special-cased in selection,
@@ -334,21 +334,22 @@ impl<'cx, 'tcx> FallibleTypeFolder<'tcx> for QueryNormalizer<'cx, 'tcx> {
         &mut self,
         constant: mir::ConstantKind<'tcx>,
     ) -> Result<mir::ConstantKind<'tcx>, Self::Error> {
-        let constant_kind = match constant {
+        Ok(match constant {
             mir::ConstantKind::Ty(c) => {
-                let const_folded = c.try_fold_with(self)?;
-                match const_folded.val() {
-                    ty::ConstKind::Value(cv) => {
-                        // FIXME With Valtrees we need to convert `cv: ValTree`
-                        // to a `ConstValue` here.
-                        mir::ConstantKind::Val(cv, const_folded.ty())
+                let const_folded = c.try_super_fold_with(self)?;
+                match const_folded.kind() {
+                    ty::ConstKind::Value(valtree) => {
+                        let tcx = self.infcx.tcx;
+                        let ty = const_folded.ty();
+                        let const_val = tcx.valtree_to_const_val((ty, valtree));
+                        debug!(?ty, ?valtree, ?const_val);
+
+                        mir::ConstantKind::Val(const_val, ty)
                     }
                     _ => mir::ConstantKind::Ty(const_folded),
                 }
             }
             mir::ConstantKind::Val(_, _) => constant.try_super_fold_with(self)?,
-        };
-
-        Ok(constant_kind)
+        })
     }
 }

@@ -36,7 +36,6 @@
 #![feature(let_chains)]
 #![feature(let_else)]
 #![feature(never_type)]
-#![feature(nll)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -509,6 +508,8 @@ fn register_internals(store: &mut LintStore) {
     store.register_late_pass(|| Box::new(ExistingDocKeyword));
     store.register_lints(&TyTyKind::get_lints());
     store.register_late_pass(|| Box::new(TyTyKind));
+    store.register_lints(&Diagnostics::get_lints());
+    store.register_late_pass(|| Box::new(Diagnostics));
     store.register_lints(&PassByValue::get_lints());
     store.register_late_pass(|| Box::new(PassByValue));
     store.register_group(

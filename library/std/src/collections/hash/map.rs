@@ -54,7 +54,8 @@ use crate::sys;
 /// the [`Eq`] trait, changes while it is in the map. This is normally only
 /// possible through [`Cell`], [`RefCell`], global state, I/O, or unsafe code.
 /// The behavior resulting from such a logic error is not specified, but will
-/// not result in undefined behavior. This could include panics, incorrect results,
+/// be encapsulated to the `HashMap` that observed the logic error and not
+/// result in undefined behavior. This could include panics, incorrect results,
 /// aborts, memory leaks, and non-termination.
 ///
 /// The hash table implementation is a Rust port of Google's [SwissTable].
@@ -163,6 +164,9 @@ use crate::sys;
 /// // update a key, guarding against the key possibly not being set
 /// let stat = player_stats.entry("attack").or_insert(100);
 /// *stat += random_stat_buff();
+///
+/// // modify an entry before an insert with in-place mutation
+/// player_stats.entry("mana").and_modify(|mana| *mana += 200).or_insert(100);
 /// ```
 ///
 /// The easiest way to use `HashMap` with a custom key type is to derive [`Eq`] and [`Hash`].
@@ -828,8 +832,7 @@ where
     /// let mut letters = HashMap::new();
     ///
     /// for ch in "a short treatise on fungi".chars() {
-    ///     let counter = letters.entry(ch).or_insert(0);
-    ///     *counter += 1;
+    ///     letters.entry(ch).and_modify(|counter| *counter += 1).or_insert(1);
     /// }
     ///
     /// assert_eq!(letters[&'s'], 2);
@@ -893,6 +896,119 @@ where
         Q: Hash + Eq,
     {
         self.base.get_key_value(k)
+    }
+
+    /// Attempts to get mutable references to `N` values in the map at once.
+    ///
+    /// Returns an array of length `N` with the results of each query. For soundness, at most one
+    /// mutable reference will be returned to any value. `None` will be returned if any of the
+    /// keys are duplicates or missing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(map_many_mut)]
+    /// use std::collections::HashMap;
+    ///
+    /// let mut libraries = HashMap::new();
+    /// libraries.insert("Bodleian Library".to_string(), 1602);
+    /// libraries.insert("Athenæum".to_string(), 1807);
+    /// libraries.insert("Herzogin-Anna-Amalia-Bibliothek".to_string(), 1691);
+    /// libraries.insert("Library of Congress".to_string(), 1800);
+    ///
+    /// let got = libraries.get_many_mut([
+    ///     "Athenæum",
+    ///     "Library of Congress",
+    /// ]);
+    /// assert_eq!(
+    ///     got,
+    ///     Some([
+    ///         &mut 1807,
+    ///         &mut 1800,
+    ///     ]),
+    /// );
+    ///
+    /// // Missing keys result in None
+    /// let got = libraries.get_many_mut([
+    ///     "Athenæum",
+    ///     "New York Public Library",
+    /// ]);
+    /// assert_eq!(got, None);
+    ///
+    /// // Duplicate keys result in None
+    /// let got = libraries.get_many_mut([
+    ///     "Athenæum",
+    ///     "Athenæum",
+    /// ]);
+    /// assert_eq!(got, None);
+    /// ```
+    #[inline]
+    #[unstable(feature = "map_many_mut", issue = "97601")]
+    pub fn get_many_mut<Q: ?Sized, const N: usize>(&mut self, ks: [&Q; N]) -> Option<[&'_ mut V; N]>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.base.get_many_mut(ks)
+    }
+
+    /// Attempts to get mutable references to `N` values in the map at once, without validating that
+    /// the values are unique.
+    ///
+    /// Returns an array of length `N` with the results of each query. `None` will be returned if
+    /// any of the keys are missing.
+    ///
+    /// For a safe alternative see [`get_many_mut`](Self::get_many_mut).
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with overlapping keys is *[undefined behavior]* even if the resulting
+    /// references are not used.
+    ///
+    /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(map_many_mut)]
+    /// use std::collections::HashMap;
+    ///
+    /// let mut libraries = HashMap::new();
+    /// libraries.insert("Bodleian Library".to_string(), 1602);
+    /// libraries.insert("Athenæum".to_string(), 1807);
+    /// libraries.insert("Herzogin-Anna-Amalia-Bibliothek".to_string(), 1691);
+    /// libraries.insert("Library of Congress".to_string(), 1800);
+    ///
+    /// let got = libraries.get_many_mut([
+    ///     "Athenæum",
+    ///     "Library of Congress",
+    /// ]);
+    /// assert_eq!(
+    ///     got,
+    ///     Some([
+    ///         &mut 1807,
+    ///         &mut 1800,
+    ///     ]),
+    /// );
+    ///
+    /// // Missing keys result in None
+    /// let got = libraries.get_many_mut([
+    ///     "Athenæum",
+    ///     "New York Public Library",
+    /// ]);
+    /// assert_eq!(got, None);
+    /// ```
+    #[inline]
+    #[unstable(feature = "map_many_mut", issue = "97601")]
+    pub unsafe fn get_many_unchecked_mut<Q: ?Sized, const N: usize>(
+        &mut self,
+        ks: [&Q; N],
+    ) -> Option<[&'_ mut V; N]>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.base.get_many_unchecked_mut(ks)
     }
 
     /// Returns `true` if the map contains a value for the specified key.
@@ -3026,6 +3142,7 @@ impl DefaultHasher {
     /// `DefaultHasher` instances, but is the same as all other `DefaultHasher`
     /// instances created through `new` or `default`.
     #[stable(feature = "hashmap_default_hasher", since = "1.13.0")]
+    #[inline]
     #[allow(deprecated)]
     #[must_use]
     pub fn new() -> DefaultHasher {
@@ -3039,6 +3156,7 @@ impl Default for DefaultHasher {
     /// See its documentation for more.
     ///
     /// [`new`]: DefaultHasher::new
+    #[inline]
     fn default() -> DefaultHasher {
         DefaultHasher::new()
     }

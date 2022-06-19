@@ -219,13 +219,14 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust
-    /// // Bad
     /// fn fun() -> i32 { 1 }
-    /// let a = fun as i64;
+    /// let _ = fun as i64;
+    /// ```
     ///
-    /// // Good
-    /// fn fun2() -> i32 { 1 }
-    /// let a = fun2 as usize;
+    /// Use instead:
+    /// ```rust
+    /// # fn fun() -> i32 { 1 }
+    /// let _ = fun as usize;
     /// ```
     #[clippy::version = "pre 1.29.0"]
     pub FN_TO_NUMERIC_CAST,
@@ -245,17 +246,19 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust
-    /// // Bad
     /// fn fn1() -> i16 {
     ///     1
     /// };
     /// let _ = fn1 as i32;
+    /// ```
     ///
-    /// // Better: Cast to usize first, then comment with the reason for the truncation
-    /// fn fn2() -> i16 {
+    /// Use instead:
+    /// ```rust
+    /// // Cast to usize first, then comment with the reason for the truncation
+    /// fn fn1() -> i16 {
     ///     1
     /// };
-    /// let fn_ptr = fn2 as usize;
+    /// let fn_ptr = fn1 as usize;
     /// let fn_ptr_truncated = fn_ptr as i32;
     /// ```
     #[clippy::version = "pre 1.29.0"]
@@ -277,19 +280,24 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust
-    /// // Bad: fn1 is cast as `usize`
+    /// // fn1 is cast as `usize`
     /// fn fn1() -> u16 {
     ///     1
     /// };
     /// let _ = fn1 as usize;
+    /// ```
     ///
-    /// // Good: maybe you intended to call the function?
+    /// Use instead:
+    /// ```rust
+    /// // maybe you intended to call the function?
     /// fn fn2() -> u16 {
     ///     1
     /// };
     /// let _ = fn2() as usize;
     ///
-    /// // Good: maybe you intended to cast it to a function type?
+    /// // or
+    ///
+    /// // maybe you intended to cast it to a function type?
     /// fn fn3() -> u16 {
     ///     1
     /// }
@@ -306,7 +314,7 @@ declare_clippy_lint! {
     /// Checks for casts of `&T` to `&mut T` anywhere in the code.
     ///
     /// ### Why is this bad?
-    /// It’s basically guaranteed to be undefined behaviour.
+    /// It’s basically guaranteed to be undefined behavior.
     /// `UnsafeCell` is the only way to obtain aliasable data that is considered
     /// mutable.
     ///
@@ -406,13 +414,14 @@ declare_clippy_lint! {
     /// enum E { X = 256 };
     /// let _ = E::X as u8;
     /// ```
-    #[clippy::version = "1.60.0"]
+    #[clippy::version = "1.61.0"]
     pub CAST_ENUM_TRUNCATION,
     suspicious,
     "casts from an enum type to an integral type which will truncate the value"
 }
 
 declare_clippy_lint! {
+    /// ### What it does
     /// Checks for `as` casts between raw pointers to slices with differently sized elements.
     ///
     /// ### Why is this bad?
@@ -450,7 +459,7 @@ declare_clippy_lint! {
     ///     println!("{:?}", &*new_ptr);
     /// }
     /// ```
-    #[clippy::version = "1.60.0"]
+    #[clippy::version = "1.61.0"]
     pub CAST_SLICE_DIFFERENT_SIZES,
     correctness,
     "casting using `as` between raw pointers to slices of types with different sizes"
@@ -531,7 +540,7 @@ impl_lint_pass!(Casts => [
 impl<'tcx> LateLintPass<'tcx> for Casts {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if !in_external_macro(cx.sess(), expr.span) {
-            ptr_as_ptr::check(cx, expr, &self.msrv);
+            ptr_as_ptr::check(cx, expr, self.msrv);
         }
 
         if expr.span.from_expansion() {
@@ -561,9 +570,9 @@ impl<'tcx> LateLintPass<'tcx> for Casts {
                     cast_possible_wrap::check(cx, expr, cast_from, cast_to);
                     cast_precision_loss::check(cx, expr, cast_from, cast_to);
                     cast_sign_loss::check(cx, expr, cast_expr, cast_from, cast_to);
-                    cast_abs_to_unsigned::check(cx, expr, cast_expr, cast_from, cast_to, &self.msrv);
+                    cast_abs_to_unsigned::check(cx, expr, cast_expr, cast_from, cast_to, self.msrv);
                 }
-                cast_lossless::check(cx, expr, cast_expr, cast_from, cast_to, &self.msrv);
+                cast_lossless::check(cx, expr, cast_expr, cast_from, cast_to, self.msrv);
                 cast_enum_constructor::check(cx, expr, cast_expr, cast_from);
             }
         }
@@ -571,8 +580,8 @@ impl<'tcx> LateLintPass<'tcx> for Casts {
         cast_ref_to_mut::check(cx, expr);
         cast_ptr_alignment::check(cx, expr);
         char_lit_as_u8::check(cx, expr);
-        ptr_as_ptr::check(cx, expr, &self.msrv);
-        cast_slice_different_sizes::check(cx, expr, &self.msrv);
+        ptr_as_ptr::check(cx, expr, self.msrv);
+        cast_slice_different_sizes::check(cx, expr, self.msrv);
     }
 
     extract_msrv_attr!(LateContext);

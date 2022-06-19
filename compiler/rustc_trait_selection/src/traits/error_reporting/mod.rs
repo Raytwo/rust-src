@@ -27,7 +27,7 @@ use rustc_infer::traits::TraitEngine;
 use rustc_middle::thir::abstract_const::NotConstEvaluatable;
 use rustc_middle::traits::select::OverflowError;
 use rustc_middle::ty::error::ExpectedFound;
-use rustc_middle::ty::fold::TypeFolder;
+use rustc_middle::ty::fold::{TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::{
     self, SubtypePredicate, ToPolyTraitRef, ToPredicate, TraitRef, Ty, TyCtxt, TypeFoldable,
 };
@@ -273,6 +273,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
         error: &SelectionError<'tcx>,
         fallback_has_occurred: bool,
     ) {
+        self.set_tainted_by_errors();
         let tcx = self.tcx;
         let mut span = obligation.cause.span;
 
@@ -416,7 +417,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                                     span.shrink_to_lo(),
                                     "consider converting the `Option<T>` into a `Result<T, _>` \
                                      using `Option::ok_or` or `Option::ok_or_else`",
-                                    ".ok_or_else(|| /* error value */)".to_string(),
+                                    ".ok_or_else(|| /* error value */)",
                                     Applicability::HasPlaceholders,
                                 );
                             } else if should_convert_result_to_option {
@@ -424,7 +425,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                                     span.shrink_to_lo(),
                                     "consider converting the `Result<T, _>` into an `Option<T>` \
                                      using `Result::ok`",
-                                    ".ok()".to_string(),
+                                    ".ok()",
                                     Applicability::MachineApplicable,
                                 );
                             }
@@ -1083,11 +1084,11 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
         let hir = self.tcx.hir();
         Some(match node {
             Node::Expr(&hir::Expr {
-                kind: hir::ExprKind::Closure(_, ref _decl, id, span, _),
+                kind: hir::ExprKind::Closure { body, fn_decl_span, .. },
                 ..
             }) => (
-                sm.guess_head_span(span),
-                hir.body(id)
+                sm.guess_head_span(fn_decl_span),
+                hir.body(body)
                     .params
                     .iter()
                     .map(|arg| {
@@ -1535,7 +1536,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'a, 'tcx> for InferCtxt<'a, 'tcx> {
             let bound_predicate = predicate.kind();
             if let ty::PredicateKind::Projection(data) = bound_predicate.skip_binder() {
                 let mut selcx = SelectionContext::new(self);
-                let (data, _) = self.replace_bound_vars_with_fresh_vars(
+                let data = self.replace_bound_vars_with_fresh_vars(
                     obligation.cause.span,
                     infer::LateBoundRegionConversionTime::HigherRankedType,
                     bound_predicate.rebind(data),

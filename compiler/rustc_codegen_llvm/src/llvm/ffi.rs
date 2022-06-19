@@ -381,9 +381,8 @@ pub enum AtomicOrdering {
 impl AtomicOrdering {
     pub fn from_generic(ao: rustc_codegen_ssa::common::AtomicOrdering) -> Self {
         match ao {
-            rustc_codegen_ssa::common::AtomicOrdering::NotAtomic => AtomicOrdering::NotAtomic,
             rustc_codegen_ssa::common::AtomicOrdering::Unordered => AtomicOrdering::Unordered,
-            rustc_codegen_ssa::common::AtomicOrdering::Monotonic => AtomicOrdering::Monotonic,
+            rustc_codegen_ssa::common::AtomicOrdering::Relaxed => AtomicOrdering::Monotonic,
             rustc_codegen_ssa::common::AtomicOrdering::Acquire => AtomicOrdering::Acquire,
             rustc_codegen_ssa::common::AtomicOrdering::Release => AtomicOrdering::Release,
             rustc_codegen_ssa::common::AtomicOrdering::AcquireRelease => {
@@ -443,6 +442,7 @@ pub enum MetadataType {
     MD_nonnull = 11,
     MD_align = 17,
     MD_type = 19,
+    MD_vcall_visibility = 28,
     MD_noundef = 29,
 }
 
@@ -1068,6 +1068,7 @@ extern "C" {
     pub fn LLVMReplaceAllUsesWith<'a>(OldVal: &'a Value, NewVal: &'a Value);
     pub fn LLVMSetMetadata<'a>(Val: &'a Value, KindID: c_uint, Node: &'a Value);
     pub fn LLVMGlobalSetMetadata<'a>(Val: &'a Value, KindID: c_uint, Metadata: &'a Metadata);
+    pub fn LLVMRustGlobalAddMetadata<'a>(Val: &'a Value, KindID: c_uint, Metadata: &'a Metadata);
     pub fn LLVMValueAsMetadata(Node: &Value) -> &Metadata;
 
     // Operations on constants of any type
@@ -1081,6 +1082,11 @@ extern "C" {
         Vals: *const &'a Value,
         Count: c_uint,
     ) -> &'a Value;
+    pub fn LLVMMDNodeInContext2<'a>(
+        C: &'a Context,
+        Vals: *const &'a Metadata,
+        Count: size_t,
+    ) -> &'a Metadata;
     pub fn LLVMAddNamedMetadataOperand<'a>(M: &'a Module, Name: *const c_char, Val: &'a Value);
 
     // Operations on scalar constants
@@ -1937,6 +1943,7 @@ extern "C" {
         name: *const c_char,
         value: u32,
     );
+    pub fn LLVMRustHasModuleFlag(M: &Module, name: *const c_char, len: size_t) -> bool;
 
     pub fn LLVMRustMetadataAsValue<'a>(C: &'a Context, MD: &'a Metadata) -> &'a Value;
 

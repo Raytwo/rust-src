@@ -166,9 +166,10 @@ mod tests;
 /// item's ordering relative to any other item, as determined by the [`Ord`]
 /// trait, changes while it is in the heap. This is normally only possible
 /// through [`Cell`], [`RefCell`], global state, I/O, or unsafe code. The
-/// behavior resulting from such a logic error is not specified (it
-/// could include panics, incorrect results, aborts, memory leaks, or
-/// non-termination) but will not be undefined behavior.
+/// behavior resulting from such a logic error is not specified, but will
+/// be encapsulated to the `BinaryHeap` that observed the logic error and not
+/// result in undefined behavior. This could include panics, incorrect results,
+/// aborts, memory leaks, and non-termination.
 ///
 /// # Examples
 ///
@@ -977,7 +978,6 @@ impl<T> BinaryHeap<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(try_reserve_2)]
     /// use std::collections::BinaryHeap;
     /// use std::collections::TryReserveError;
     ///
@@ -994,7 +994,7 @@ impl<T> BinaryHeap<T> {
     /// }
     /// # find_max_slow(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
-    #[unstable(feature = "try_reserve_2", issue = "91789")]
+    #[stable(feature = "try_reserve_2", since = "1.63.0")]
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.data.try_reserve_exact(additional)
     }
@@ -1013,7 +1013,6 @@ impl<T> BinaryHeap<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(try_reserve_2)]
     /// use std::collections::BinaryHeap;
     /// use std::collections::TryReserveError;
     ///
@@ -1030,7 +1029,7 @@ impl<T> BinaryHeap<T> {
     /// }
     /// # find_max_slow(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
-    #[unstable(feature = "try_reserve_2", issue = "91789")]
+    #[stable(feature = "try_reserve_2", since = "1.63.0")]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.data.try_reserve(additional)
     }

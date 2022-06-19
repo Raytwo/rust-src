@@ -89,7 +89,6 @@
 
 #![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
 #![feature(never_type)]
-#![feature(nll)]
 #![recursion_limit = "256"]
 #![allow(rustc::potential_query_instability)]
 
@@ -154,6 +153,13 @@ fn symbol_name_provider<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> ty
 /// This function computes the typeid for the given function ABI.
 pub fn typeid_for_fnabi<'tcx>(tcx: TyCtxt<'tcx>, fn_abi: &FnAbi<'tcx, Ty<'tcx>>) -> String {
     v0::mangle_typeid_for_fnabi(tcx, fn_abi)
+}
+
+pub fn typeid_for_trait_ref<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    trait_ref: ty::PolyExistentialTraitRef<'tcx>,
+) -> String {
+    v0::mangle_typeid_for_trait_ref(tcx, trait_ref)
 }
 
 /// Computes the symbol name for the given instance. This function will call

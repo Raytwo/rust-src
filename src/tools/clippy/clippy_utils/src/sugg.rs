@@ -17,7 +17,6 @@ use rustc_middle::ty;
 use rustc_span::source_map::{BytePos, CharPos, Pos, Span, SyntaxContext};
 use rustc_typeck::expr_use_visitor::{Delegate, ExprUseVisitor, PlaceBase, PlaceWithHirId};
 use std::borrow::Cow;
-use std::convert::TryInto;
 use std::fmt::{Display, Write as _};
 use std::iter;
 use std::ops::{Add, Neg, Not, Sub};
@@ -50,7 +49,7 @@ impl Display for Sugg<'_> {
     }
 }
 
-#[allow(clippy::wrong_self_convention)] // ok, because of the function `as_ty` method
+#[expect(clippy::wrong_self_convention)] // ok, because of the function `as_ty` method
 impl<'a> Sugg<'a> {
     /// Prepare a suggestion from an expression.
     pub fn hir_opt(cx: &LateContext<'_>, expr: &hir::Expr<'_>) -> Option<Self> {
@@ -135,7 +134,7 @@ impl<'a> Sugg<'a> {
             | hir::ExprKind::Box(..)
             | hir::ExprKind::If(..)
             | hir::ExprKind::Let(..)
-            | hir::ExprKind::Closure(..)
+            | hir::ExprKind::Closure { .. }
             | hir::ExprKind::Unary(..)
             | hir::ExprKind::Match(..) => Sugg::MaybeParen(get_snippet(expr.span)),
             hir::ExprKind::Continue(..)
@@ -189,7 +188,7 @@ impl<'a> Sugg<'a> {
         match expr.kind {
             ast::ExprKind::AddrOf(..)
             | ast::ExprKind::Box(..)
-            | ast::ExprKind::Closure(..)
+            | ast::ExprKind::Closure { .. }
             | ast::ExprKind::If(..)
             | ast::ExprKind::Let(..)
             | ast::ExprKind::Unary(..)
@@ -318,7 +317,6 @@ impl<'a> Sugg<'a> {
 
     /// Convenience method to create the `<lhs>..<rhs>` or `<lhs>...<rhs>`
     /// suggestion.
-    #[allow(dead_code)]
     pub fn range(self, end: &Self, limit: ast::RangeLimits) -> Sugg<'static> {
         match limit {
             ast::RangeLimits::HalfOpen => make_assoc(AssocOp::DotDot, &self, end),
@@ -773,7 +771,7 @@ impl<T: LintContext> DiagnosticExt<T> for rustc_errors::Diagnostic {
             }
         }
 
-        self.span_suggestion(remove_span, msg, String::new(), applicability);
+        self.span_suggestion(remove_span, msg, "", applicability);
     }
 }
 
@@ -792,8 +790,8 @@ pub struct DerefClosure {
 ///
 /// note: this only works on single line immutable closures with exactly one input parameter.
 pub fn deref_closure_args<'tcx>(cx: &LateContext<'_>, closure: &'tcx hir::Expr<'_>) -> Option<DerefClosure> {
-    if let hir::ExprKind::Closure(_, fn_decl, body_id, ..) = closure.kind {
-        let closure_body = cx.tcx.hir().body(body_id);
+    if let hir::ExprKind::Closure { fn_decl, body, .. } = closure.kind {
+        let closure_body = cx.tcx.hir().body(body);
         // is closure arg a type annotated double reference (i.e.: `|x: &&i32| ...`)
         // a type annotation is present if param `kind` is different from `TyKind::Infer`
         let closure_arg_is_type_annotated_double_ref = if let TyKind::Rptr(_, MutTy { ty, .. }) = fn_decl.inputs[0].kind
@@ -886,7 +884,6 @@ impl<'tcx> DerefDelegate<'_, 'tcx> {
 impl<'tcx> Delegate<'tcx> for DerefDelegate<'_, 'tcx> {
     fn consume(&mut self, _: &PlaceWithHirId<'tcx>, _: HirId) {}
 
-    #[allow(clippy::too_many_lines)]
     fn borrow(&mut self, cmt: &PlaceWithHirId<'tcx>, _: HirId, _: ty::BorrowKind) {
         if let PlaceBase::Local(id) = cmt.place.base {
             let map = self.cx.tcx.hir();

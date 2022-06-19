@@ -1,6 +1,6 @@
-use crate::ImplTraitPosition;
-
+use super::ResolverAstLoweringExt;
 use super::{ImplTraitContext, LoweringContext, ParamMode};
+use crate::ImplTraitPosition;
 
 use rustc_ast::ptr::P;
 use rustc_ast::*;
@@ -139,7 +139,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         .span_suggestion_verbose(
                             sp,
                             &format!("if you don't need to use the contents of {}, discard the tuple's remaining fields", ident),
-                            "..".to_string(),
+                            "..",
                             Applicability::MaybeIncorrect,
                         )
                         .emit();

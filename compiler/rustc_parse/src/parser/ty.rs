@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
                 .span_suggestion_short(
                     self.prev_token.span,
                     "use `->` instead",
-                    "->".to_string(),
+                    "->",
                     Applicability::MachineApplicable,
                 )
                 .emit();
@@ -312,13 +312,18 @@ impl<'a> Parser<'a> {
         };
 
         let span = lo.to(self.prev_token.span);
-        let ty = self.mk_ty(span, kind);
+        let mut ty = self.mk_ty(span, kind);
 
         // Try to recover from use of `+` with incorrect priority.
-        self.maybe_report_ambiguous_plus(allow_plus, impl_dyn_multi, &ty);
-        self.maybe_recover_from_bad_type_plus(allow_plus, &ty)?;
-        let ty = self.maybe_recover_from_question_mark(ty, recover_question_mark);
-        self.maybe_recover_from_bad_qpath(ty, allow_qpath_recovery)
+        if matches!(allow_plus, AllowPlus::Yes) {
+            self.maybe_recover_from_bad_type_plus(&ty)?;
+        } else {
+            self.maybe_report_ambiguous_plus(impl_dyn_multi, &ty);
+        }
+        if let RecoverQuestionMark::Yes = recover_question_mark {
+            ty = self.maybe_recover_from_question_mark(ty);
+        }
+        if allow_qpath_recovery { self.maybe_recover_from_bad_qpath(ty) } else { Ok(ty) }
     }
 
     /// Parses either:
@@ -474,7 +479,7 @@ impl<'a> Parser<'a> {
             err.span_suggestion(
                 span,
                 "place `mut` before `dyn`",
-                "&mut dyn".to_string(),
+                "&mut dyn",
                 Applicability::MachineApplicable,
             );
             err.emit();
@@ -543,7 +548,7 @@ impl<'a> Parser<'a> {
             .span_suggestion_short(
                 qual_span,
                 &format!("remove the `{}` qualifier", qual),
-                String::new(),
+                "",
                 Applicability::MaybeIncorrect,
             )
             .emit();
@@ -643,7 +648,7 @@ impl<'a> Parser<'a> {
                     .span_suggestion(
                         self.token.span,
                         "remove this keyword",
-                        String::new(),
+                        "",
                         Applicability::MachineApplicable,
                     )
                     .emit();

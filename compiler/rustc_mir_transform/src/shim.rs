@@ -430,7 +430,7 @@ impl<'tcx> CloneShimBuilder<'tcx> {
         let func = Operand::Constant(Box::new(Constant {
             span: self.span,
             user_ty: None,
-            literal: ty::Const::zero_sized(tcx, func_ty).into(),
+            literal: ConstantKind::zero_sized(func_ty),
         }));
 
         let ref_loc = self.make_place(
@@ -450,7 +450,8 @@ impl<'tcx> CloneShimBuilder<'tcx> {
             TerminatorKind::Call {
                 func,
                 args: vec![Operand::Move(ref_loc)],
-                destination: Some((dest, next)),
+                destination: dest,
+                target: Some(next),
                 cleanup: Some(cleanup),
                 from_hir_call: true,
                 fn_span: self.span,
@@ -629,7 +630,7 @@ fn build_call_shim<'tcx>(
                 Operand::Constant(Box::new(Constant {
                     span,
                     user_ty: None,
-                    literal: ty::Const::zero_sized(tcx, ty).into(),
+                    literal: ConstantKind::zero_sized(ty),
                 })),
                 rcvr.into_iter().collect::<Vec<_>>(),
             )
@@ -676,7 +677,8 @@ fn build_call_shim<'tcx>(
         TerminatorKind::Call {
             func: callee,
             args,
-            destination: Some((Place::return_place(), BasicBlock::new(1))),
+            destination: Place::return_place(),
+            target: Some(BasicBlock::new(1)),
             cleanup: if let Some(Adjustment::RefMut) = rcvr_adjustment {
                 Some(BasicBlock::new(3))
             } else {

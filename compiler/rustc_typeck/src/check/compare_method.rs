@@ -255,7 +255,7 @@ fn compare_predicate_entailment<'tcx>(
 
         let mut wf_tys = FxHashSet::default();
 
-        let (impl_sig, _) = infcx.replace_bound_vars_with_fresh_vars(
+        let impl_sig = infcx.replace_bound_vars_with_fresh_vars(
             impl_m_span,
             infer::HigherRankedType,
             tcx.fn_sig(impl_m.def_id),
@@ -354,7 +354,7 @@ fn compare_predicate_entailment<'tcx>(
                                         diag.span_suggestion_verbose(sp, msg, sugg, ap);
                                     }
                                     hir::FnRetTy::Return(hir_ty) => {
-                                        let sugg = trait_sig.output().to_string();
+                                        let sugg = trait_sig.output();
                                         diag.span_suggestion(hir_ty.span, msg, sugg, ap);
                                     }
                                 };
@@ -365,7 +365,7 @@ fn compare_predicate_entailment<'tcx>(
                         diag.span_suggestion(
                             impl_err_span,
                             "change the parameter type to match the trait",
-                            trait_ty.to_string(),
+                            trait_ty,
                             Applicability::MachineApplicable,
                         );
                     }
@@ -660,8 +660,24 @@ fn compare_number_of_generics<'tcx>(
                     _ => None,
                 })
                 .collect();
-            let spans = impl_item.generics.spans();
-            let span = spans.primary_span();
+            let spans = if impl_item.generics.params.is_empty() {
+                vec![impl_item.generics.span]
+            } else {
+                impl_item
+                    .generics
+                    .params
+                    .iter()
+                    .filter(|p| {
+                        matches!(
+                            p.kind,
+                            hir::GenericParamKind::Type { .. }
+                                | hir::GenericParamKind::Const { .. }
+                        )
+                    })
+                    .map(|p| p.span)
+                    .collect::<Vec<Span>>()
+            };
+            let span = spans.first().copied();
 
             let mut err = tcx.sess.struct_span_err_with_code(
                 spans,
@@ -1363,7 +1379,7 @@ pub fn check_type_bounds<'tcx>(
             bound_vars.push(bound_var);
             tcx.mk_const(ty::ConstS {
                 ty: tcx.type_of(param.def_id),
-                val: ty::ConstKind::Bound(
+                kind: ty::ConstKind::Bound(
                     ty::INNERMOST,
                     ty::BoundVar::from_usize(bound_vars.len() - 1),
                 ),

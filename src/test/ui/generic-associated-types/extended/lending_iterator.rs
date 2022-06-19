@@ -33,7 +33,6 @@ pub trait LendingIterator {
         Self: for<'q> LendingIterator<Item<'q> = A>,
     {
         <B as FromLendingIterator<A>>::from_iter(self)
-        //[base]~^ the parameter type
     }
 }
 

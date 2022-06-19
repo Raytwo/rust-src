@@ -87,7 +87,7 @@ declare_clippy_lint! {
     /// #     print!("{}", f(1));
     /// # }
     /// ```
-    #[clippy::version = "1.60.0"]
+    #[clippy::version = "1.61.0"]
     pub ONLY_USED_IN_RECURSION,
     nursery,
     "arguments that is only used in recursion can be removed"
@@ -298,8 +298,8 @@ impl<'tcx> Visitor<'tcx> for SideEffectVisit<'tcx> {
             },
             ExprKind::Match(expr, arms, _) => self.visit_match(expr, arms),
             // since analysing the closure is not easy, just set all variables in it to side-effect
-            ExprKind::Closure(_, _, body_id, _, _) => {
-                let body = self.tcx.hir().body(body_id);
+            ExprKind::Closure { body, .. } => {
+                let body = self.tcx.hir().body(body);
                 self.visit_body(body);
                 let vars = std::mem::take(&mut self.ret_vars);
                 self.add_side_effect(vars);

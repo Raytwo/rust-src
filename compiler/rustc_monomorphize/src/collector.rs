@@ -201,7 +201,6 @@ use rustc_session::lint::builtin::LARGE_ASSIGNMENTS;
 use rustc_session::Limit;
 use rustc_span::source_map::{dummy_spanned, respan, Span, Spanned, DUMMY_SP};
 use rustc_target::abi::Size;
-use smallvec::SmallVec;
 use std::iter;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -226,6 +225,44 @@ pub struct InliningMap<'tcx> {
     inlines: GrowableBitSet<usize>,
 }
 
+/// Struct to store mono items in each collecting and if they should
+/// be inlined. We call `instantiation_mode` to get their inlining
+/// status when inserting new elements, which avoids calling it in
+/// `inlining_map.lock_mut()`. See the `collect_items_rec` implementation
+/// below.
+struct MonoItems<'tcx> {
+    // If this is false, we do not need to compute whether items
+    // will need to be inlined.
+    compute_inlining: bool,
+
+    // The TyCtxt used to determine whether the a item should
+    // be inlined.
+    tcx: TyCtxt<'tcx>,
+
+    // The collected mono items. The bool field in each element
+    // indicates whether this element should be inlined.
+    items: Vec<(Spanned<MonoItem<'tcx>>, bool /*inlined*/)>,
+}
+
+impl<'tcx> MonoItems<'tcx> {
+    #[inline]
+    fn push(&mut self, item: Spanned<MonoItem<'tcx>>) {
+        self.extend([item]);
+    }
+
+    #[inline]
+    fn extend<T: IntoIterator<Item = Spanned<MonoItem<'tcx>>>>(&mut self, iter: T) {
+        self.items.extend(iter.into_iter().map(|mono_item| {
+            let inlined = if !self.compute_inlining {
+                false
+            } else {
+                mono_item.node.instantiation_mode(self.tcx) == InstantiationMode::LocalCopy
+            };
+            (mono_item, inlined)
+        }))
+    }
+}
+
 impl<'tcx> InliningMap<'tcx> {
     fn new() -> InliningMap<'tcx> {
         InliningMap {
@@ -235,7 +272,13 @@ impl<'tcx> InliningMap<'tcx> {
         }
     }
 
-    fn record_accesses(&mut self, source: MonoItem<'tcx>, new_targets: &[(MonoItem<'tcx>, bool)]) {
+    fn record_accesses<'a>(
+        &mut self,
+        source: MonoItem<'tcx>,
+        new_targets: &'a [(Spanned<MonoItem<'tcx>>, bool)],
+    ) where
+        'tcx: 'a,
+    {
         let start_index = self.targets.len();
         let new_items_count = new_targets.len();
         let new_items_count_total = new_items_count + self.targets.len();
@@ -243,9 +286,9 @@ impl<'tcx> InliningMap<'tcx> {
         self.targets.reserve(new_items_count);
         self.inlines.ensure(new_items_count_total);
 
-        for (i, (target, inline)) in new_targets.iter().enumerate() {
-            self.targets.push(*target);
-            if *inline {
+        for (i, (Spanned { node: mono_item, .. }, inlined)) in new_targets.into_iter().enumerate() {
+            self.targets.push(*mono_item);
+            if *inlined {
                 self.inlines.insert(i + start_index);
             }
         }
@@ -280,6 +323,7 @@ impl<'tcx> InliningMap<'tcx> {
     }
 }
 
+#[instrument(skip(tcx, mode), level = "debug")]
 pub fn collect_crate_mono_items(
     tcx: TyCtxt<'_>,
     mode: MonoItemCollectionMode,
@@ -319,9 +363,10 @@ pub fn collect_crate_mono_items(
 
 // Find all non-generic items by walking the HIR. These items serve as roots to
 // start monomorphizing from.
+#[instrument(skip(tcx, mode), level = "debug")]
 fn collect_roots(tcx: TyCtxt<'_>, mode: MonoItemCollectionMode) -> Vec<MonoItem<'_>> {
     debug!("collecting roots");
-    let mut roots = Vec::new();
+    let mut roots = MonoItems { compute_inlining: false, tcx, items: Vec::new() };
 
     {
         let entry_fn = tcx.entry_fn(());
@@ -347,13 +392,17 @@ fn collect_roots(tcx: TyCtxt<'_>, mode: MonoItemCollectionMode) -> Vec<MonoItem<
     // whose predicates hold. Luckily, items that aren't instantiable
     // can't actually be used, so we can just skip codegenning them.
     roots
+        .items
         .into_iter()
-        .filter_map(|root| root.node.is_instantiable(tcx).then_some(root.node))
+        .filter_map(|(Spanned { node: mono_item, .. }, _)| {
+            mono_item.is_instantiable(tcx).then_some(mono_item)
+        })
         .collect()
 }
 
 /// Collect all monomorphized items reachable from `starting_point`, and emit a note diagnostic if a
 /// post-monorphization error is encountered during a collection step.
+#[instrument(skip(tcx, visited, recursion_depths, recursion_limit, inlining_map), level = "debug")]
 fn collect_items_rec<'tcx>(
     tcx: TyCtxt<'tcx>,
     starting_point: Spanned<MonoItem<'tcx>>,
@@ -368,7 +417,7 @@ fn collect_items_rec<'tcx>(
     }
     debug!("BEGIN collect_items_rec({})", starting_point.node);
 
-    let mut neighbors = Vec::new();
+    let mut neighbors = MonoItems { compute_inlining: true, tcx, items: Vec::new() };
     let recursion_depth_reset;
 
     //
@@ -483,10 +532,9 @@ fn collect_items_rec<'tcx>(
             &format!("the above error was encountered while instantiating `{}`", formatted_item),
         );
     }
+    inlining_map.lock_mut().record_accesses(starting_point.node, &neighbors.items);
 
-    record_accesses(tcx, starting_point.node, neighbors.iter().map(|i| &i.node), inlining_map);
-
-    for neighbour in neighbors {
+    for (neighbour, _) in neighbors.items {
         collect_items_rec(tcx, neighbour, visited, recursion_depths, recursion_limit, inlining_map);
     }
 
@@ -495,25 +543,6 @@ fn collect_items_rec<'tcx>(
     }
 
     debug!("END collect_items_rec({})", starting_point.node);
-}
-
-fn record_accesses<'a, 'tcx: 'a>(
-    tcx: TyCtxt<'tcx>,
-    caller: MonoItem<'tcx>,
-    callees: impl Iterator<Item = &'a MonoItem<'tcx>>,
-    inlining_map: MTRef<'_, MTLock<InliningMap<'tcx>>>,
-) {
-    let is_inlining_candidate = |mono_item: &MonoItem<'tcx>| {
-        mono_item.instantiation_mode(tcx) == InstantiationMode::LocalCopy
-    };
-
-    // We collect this into a `SmallVec` to avoid calling `is_inlining_candidate` in the lock.
-    // FIXME: Call `is_inlining_candidate` when pushing to `neighbors` in `collect_items_rec`
-    // instead to avoid creating this `SmallVec`.
-    let accesses: SmallVec<[_; 128]> =
-        callees.map(|mono_item| (*mono_item, is_inlining_candidate(mono_item))).collect();
-
-    inlining_map.lock_mut().record_accesses(caller, &accesses);
 }
 
 /// Format instance name that is already known to be too long for rustc.
@@ -627,7 +656,7 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
 struct MirNeighborCollector<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     body: &'a mir::Body<'tcx>,
-    output: &'a mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &'a mut MonoItems<'tcx>,
     instance: Instance<'tcx>,
 }
 
@@ -726,13 +755,15 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
     /// This does not walk the constant, as it has been handled entirely here and trying
     /// to walk it would attempt to evaluate the `ty::Const` inside, which doesn't necessarily
     /// work, as some constants cannot be represented in the type system.
+    #[instrument(skip(self), level = "debug")]
     fn visit_constant(&mut self, constant: &mir::Constant<'tcx>, location: Location) {
         let literal = self.monomorphize(constant.literal);
         let val = match literal {
             mir::ConstantKind::Val(val, _) => val,
-            mir::ConstantKind::Ty(ct) => match ct.val() {
-                ty::ConstKind::Value(val) => val,
+            mir::ConstantKind::Ty(ct) => match ct.kind() {
+                ty::ConstKind::Value(val) => self.tcx.valtree_to_const_val((ct.ty(), val)),
                 ty::ConstKind::Unevaluated(ct) => {
+                    debug!(?ct);
                     let param_env = ty::ParamEnv::reveal_all();
                     match self.tcx.const_eval_resolve(param_env, ct, None) {
                         // The `monomorphize` call should have evaluated that constant already.
@@ -752,14 +783,18 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
         self.visit_ty(literal.ty(), TyContext::Location(location));
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_const(&mut self, constant: ty::Const<'tcx>, location: Location) {
         debug!("visiting const {:?} @ {:?}", constant, location);
 
         let substituted_constant = self.monomorphize(constant);
         let param_env = ty::ParamEnv::reveal_all();
 
-        match substituted_constant.val() {
-            ty::ConstKind::Value(val) => collect_const_value(self.tcx, val, self.output),
+        match substituted_constant.kind() {
+            ty::ConstKind::Value(val) => {
+                let const_val = self.tcx.valtree_to_const_val((constant.ty(), val));
+                collect_const_value(self.tcx, const_val, self.output)
+            }
             ty::ConstKind::Unevaluated(unevaluated) => {
                 match self.tcx.const_eval_resolve(param_env, unevaluated, None) {
                     // The `monomorphize` call should have evaluated that constant already.
@@ -905,7 +940,7 @@ fn visit_drop_use<'tcx>(
     ty: Ty<'tcx>,
     is_direct_call: bool,
     source: Span,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     let instance = Instance::resolve_drop_in_place(tcx, ty);
     visit_instance_use(tcx, instance, is_direct_call, source, output);
@@ -916,7 +951,7 @@ fn visit_fn_use<'tcx>(
     ty: Ty<'tcx>,
     is_direct_call: bool,
     source: Span,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     if let ty::FnDef(def_id, substs) = *ty.kind() {
         let instance = if is_direct_call {
@@ -934,7 +969,7 @@ fn visit_instance_use<'tcx>(
     instance: ty::Instance<'tcx>,
     is_direct_call: bool,
     source: Span,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     debug!("visit_item_use({:?}, is_direct_call={:?})", instance, is_direct_call);
     if !should_codegen_locally(tcx, &instance) {
@@ -1094,6 +1129,7 @@ fn find_vtable_types_for_unsizing<'tcx>(
     }
 }
 
+#[instrument(skip(tcx), level = "debug")]
 fn create_fn_mono_item<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
@@ -1107,7 +1143,10 @@ fn create_fn_mono_item<'tcx>(
         crate::util::dump_closure_profile(tcx, instance);
     }
 
-    respan(source, MonoItem::Fn(instance.polymorphize(tcx)))
+    let respanned = respan(source, MonoItem::Fn(instance.polymorphize(tcx)));
+    debug!(?respanned);
+
+    respanned
 }
 
 /// Creates a `MonoItem` for each method that is referenced by the vtable for
@@ -1117,7 +1156,7 @@ fn create_mono_items_for_vtable_methods<'tcx>(
     trait_ty: Ty<'tcx>,
     impl_ty: Ty<'tcx>,
     source: Span,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     assert!(!trait_ty.has_escaping_bound_vars() && !impl_ty.has_escaping_bound_vars());
 
@@ -1159,7 +1198,7 @@ fn create_mono_items_for_vtable_methods<'tcx>(
 struct RootCollector<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     mode: MonoItemCollectionMode,
-    output: &'a mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &'a mut MonoItems<'tcx>,
     entry_fn: Option<(DefId, EntryFnType)>,
 }
 
@@ -1249,6 +1288,7 @@ impl<'v> RootCollector<'_, 'v> {
 
     /// If `def_id` represents a root, pushes it onto the list of
     /// outputs. (Note that all roots must be monomorphic.)
+    #[instrument(skip(self), level = "debug")]
     fn push_if_root(&mut self, def_id: LocalDefId) {
         if self.is_root(def_id) {
             debug!("RootCollector::push_if_root: found root def_id={:?}", def_id);
@@ -1305,7 +1345,7 @@ fn item_requires_monomorphization(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
 fn create_mono_items_for_default_impls<'tcx>(
     tcx: TyCtxt<'tcx>,
     item: &'tcx hir::Item<'tcx>,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     match item.kind {
         hir::ItemKind::Impl(ref impl_) => {
@@ -1361,11 +1401,7 @@ fn create_mono_items_for_default_impls<'tcx>(
 }
 
 /// Scans the miri alloc in order to find function calls, closures, and drop-glue.
-fn collect_miri<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    alloc_id: AllocId,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
-) {
+fn collect_miri<'tcx>(tcx: TyCtxt<'tcx>, alloc_id: AllocId, output: &mut MonoItems<'tcx>) {
     match tcx.global_alloc(alloc_id) {
         GlobalAlloc::Static(def_id) => {
             assert!(!tcx.is_thread_local_static(def_id));
@@ -1393,21 +1429,21 @@ fn collect_miri<'tcx>(
 }
 
 /// Scans the MIR in order to find function calls, closures, and drop-glue.
+#[instrument(skip(tcx, output), level = "debug")]
 fn collect_neighbours<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: Instance<'tcx>,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
-    debug!("collect_neighbours: {:?}", instance.def_id());
     let body = tcx.instance_mir(instance.def);
-
     MirNeighborCollector { tcx, body: &body, output, instance }.visit_body(&body);
 }
 
+#[instrument(skip(tcx, output), level = "debug")]
 fn collect_const_value<'tcx>(
     tcx: TyCtxt<'tcx>,
     value: ConstValue<'tcx>,
-    output: &mut Vec<Spanned<MonoItem<'tcx>>>,
+    output: &mut MonoItems<'tcx>,
 ) {
     match value {
         ConstValue::Scalar(Scalar::Ptr(ptr, _size)) => collect_miri(tcx, ptr.provenance, output),

@@ -1,7 +1,7 @@
 use crate::middle::codegen_fn_attrs::CodegenFnAttrFlags;
 use crate::ty::print::{FmtPrinter, Printer};
 use crate::ty::subst::{InternalSubsts, Subst};
-use crate::ty::{self, EarlyBinder, SubstsRef, Ty, TyCtxt, TypeFoldable};
+use crate::ty::{self, EarlyBinder, SubstsRef, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable};
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def::Namespace;
 use rustc_hir::def_id::{CrateNum, DefId};
@@ -369,7 +369,6 @@ impl<'tcx> Instance<'tcx> {
     }
 
     // This should be kept up to date with `resolve`.
-    #[instrument(level = "debug", skip(tcx))]
     pub fn resolve_opt_const_arg(
         tcx: TyCtxt<'tcx>,
         param_env: ty::ParamEnv<'tcx>,

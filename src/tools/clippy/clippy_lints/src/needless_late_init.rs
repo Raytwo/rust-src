@@ -56,7 +56,7 @@ declare_clippy_lint! {
     ///     -1
     /// };
     /// ```
-    #[clippy::version = "1.58.0"]
+    #[clippy::version = "1.59.0"]
     pub NEEDLESS_LATE_INIT,
     style,
     "late initializations that can be replaced by a `let` statement with an initializer"
@@ -185,23 +185,24 @@ fn assignment_suggestions<'tcx>(
 
     let suggestions = assignments
         .iter()
-        .map(|assignment| Some((assignment.span.until(assignment.rhs_span), String::new())))
-        .chain(assignments.iter().map(|assignment| {
-            Some((
+        .flat_map(|assignment| {
+            [
+                assignment.span.until(assignment.rhs_span),
                 assignment.rhs_span.shrink_to_hi().with_hi(assignment.span.hi()),
-                String::new(),
-            ))
-        }))
-        .collect::<Option<Vec<(Span, String)>>>()?;
+            ]
+        })
+        .map(|span| (span, String::new()))
+        .collect::<Vec<(Span, String)>>();
 
-    let applicability = if suggestions.len() > 1 {
+    match suggestions.len() {
+        // All of `exprs` are never types
+        // https://github.com/rust-lang/rust-clippy/issues/8911
+        0 => None,
+        1 => Some((Applicability::MachineApplicable, suggestions)),
         // multiple suggestions don't work with rustfix in multipart_suggest
         // https://github.com/rust-lang/rustfix/issues/141
-        Applicability::Unspecified
-    } else {
-        Applicability::MachineApplicable
-    };
-    Some((applicability, suggestions))
+        _ => Some((Applicability::Unspecified, suggestions)),
+    }
 }
 
 struct Usage<'tcx> {
@@ -280,7 +281,7 @@ fn check<'tcx>(
                     diag.tool_only_span_suggestion(
                         local_stmt.span,
                         "remove the local",
-                        String::new(),
+                        "",
                         Applicability::MachineApplicable,
                     );
 
@@ -317,7 +318,7 @@ fn check<'tcx>(
                         diag.span_suggestion(
                             usage.stmt.span.shrink_to_hi(),
                             "add a semicolon after the `if` expression",
-                            ";".to_string(),
+                            ";",
                             applicability,
                         );
                     }
@@ -352,7 +353,7 @@ fn check<'tcx>(
                         diag.span_suggestion(
                             usage.stmt.span.shrink_to_hi(),
                             "add a semicolon after the `match` expression",
-                            ";".to_string(),
+                            ";",
                             applicability,
                         );
                     }

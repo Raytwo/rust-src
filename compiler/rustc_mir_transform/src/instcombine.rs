@@ -3,8 +3,8 @@
 use crate::MirPass;
 use rustc_hir::Mutability;
 use rustc_middle::mir::{
-    BinOp, Body, Constant, LocalDecls, Operand, Place, ProjectionElem, Rvalue, SourceInfo,
-    Statement, StatementKind, Terminator, TerminatorKind, UnOp,
+    BinOp, Body, Constant, ConstantKind, LocalDecls, Operand, Place, ProjectionElem, Rvalue,
+    SourceInfo, Statement, StatementKind, Terminator, TerminatorKind, UnOp,
 };
 use rustc_middle::ty::{self, TyCtxt};
 
@@ -129,8 +129,8 @@ impl<'tcx> InstCombineContext<'tcx, '_> {
                     return;
                 }
 
-                let constant =
-                    Constant { span: source_info.span, literal: len.into(), user_ty: None };
+                let literal = ConstantKind::from_const(len, self.tcx);
+                let constant = Constant { span: source_info.span, literal, user_ty: None };
                 *rvalue = Rvalue::Use(Operand::Constant(Box::new(constant)));
             }
         }
@@ -141,7 +141,7 @@ impl<'tcx> InstCombineContext<'tcx, '_> {
         terminator: &mut Terminator<'tcx>,
         statements: &mut Vec<Statement<'tcx>>,
     ) {
-        let TerminatorKind::Call { func, args, destination, .. } = &mut terminator.kind
+        let TerminatorKind::Call { func, args, destination, target, .. } = &mut terminator.kind
         else { return };
 
         // It's definitely not a clone if there are multiple arguments
@@ -149,7 +149,7 @@ impl<'tcx> InstCombineContext<'tcx, '_> {
             return;
         }
 
-        let Some((destination_place, destination_block)) = *destination
+        let Some(destination_block) = *target
         else { return };
 
         // Only bother looking more if it's easy to know what we're calling
@@ -192,12 +192,12 @@ impl<'tcx> InstCombineContext<'tcx, '_> {
 
         statements.push(Statement {
             source_info: terminator.source_info,
-            kind: StatementKind::Assign(box (
-                destination_place,
+            kind: StatementKind::Assign(Box::new((
+                *destination,
                 Rvalue::Use(Operand::Copy(
                     arg_place.project_deeper(&[ProjectionElem::Deref], self.tcx),
                 )),
-            )),
+            ))),
         });
         terminator.kind = TerminatorKind::Goto { target: destination_block };
     }

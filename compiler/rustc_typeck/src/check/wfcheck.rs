@@ -15,14 +15,13 @@ use rustc_hir::ItemKind;
 use rustc_infer::infer::outlives::env::OutlivesEnvironment;
 use rustc_infer::infer::outlives::obligations::TypeOutlives;
 use rustc_infer::infer::region_constraints::GenericKind;
-use rustc_infer::infer::{self, RegionckMode};
-use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
+use rustc_infer::infer::{self, InferCtxt, TyCtxtInferExt};
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts, Subst};
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
 use rustc_middle::ty::{
     self, AdtKind, EarlyBinder, GenericParamDefKind, ToPredicate, Ty, TyCtxt, TypeFoldable,
-    TypeVisitor,
+    TypeSuperFoldable, TypeVisitor,
 };
 use rustc_session::parse::feature_err;
 use rustc_span::symbol::{sym, Ident, Symbol};
@@ -30,9 +29,9 @@ use rustc_span::{Span, DUMMY_SP};
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt as _;
 use rustc_trait_selection::traits::{self, ObligationCause, ObligationCauseCode, WellFormedLoc};
 
+use std::cell::LazyCell;
 use std::convert::TryInto;
 use std::iter;
-use std::lazy::Lazy;
 use std::ops::ControlFlow;
 
 /// Helper type of a temporary returned by `.for_item(...)`.
@@ -41,7 +40,7 @@ use std::ops::ControlFlow;
 /// ```ignore (illustrative)
 /// F: for<'b, 'tcx> where 'tcx FnOnce(FnCtxt<'b, 'tcx>)
 /// ```
-struct CheckWfFcxBuilder<'tcx> {
+pub(super) struct CheckWfFcxBuilder<'tcx> {
     inherited: super::InheritedBuilder<'tcx>,
     id: hir::HirId,
     span: Span,
@@ -49,7 +48,7 @@ struct CheckWfFcxBuilder<'tcx> {
 }
 
 impl<'tcx> CheckWfFcxBuilder<'tcx> {
-    fn with_fcx<F>(&mut self, f: F)
+    pub(super) fn with_fcx<F>(&mut self, f: F)
     where
         F: for<'b> FnOnce(&FnCtxt<'b, 'tcx>) -> FxHashSet<Ty<'tcx>>,
     {
@@ -421,7 +420,7 @@ fn check_gat_where_clauses(tcx: TyCtxt<'_>, associated_items: &[hir::TraitItemRe
 
             let suggestion = format!(
                 "{} {}",
-                if !gat_item_hir.generics.predicates.is_empty() { "," } else { " where" },
+                gat_item_hir.generics.add_where_or_trailing_comma(),
                 unsatisfied_bounds.join(", "),
             );
             err.span_suggestion(
@@ -650,11 +649,7 @@ fn resolve_regions_with_wf_tys<'tcx>(
 
         add_constraints(&infcx, region_bound_pairs);
 
-        let errors = infcx.resolve_regions(
-            id.expect_owner().to_def_id(),
-            &outlives_environment,
-            RegionckMode::default(),
-        );
+        let errors = infcx.resolve_regions(id.expect_owner().to_def_id(), &outlives_environment);
 
         debug!(?errors, "errors");
 
@@ -827,7 +822,9 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
                     );
                 }
 
-                if traits::search_for_structural_match_violation(param.span, tcx, ty).is_some() {
+                if let Some(non_structural_match_ty) =
+                    traits::search_for_structural_match_violation(param.span, tcx, ty)
+                {
                     // We use the same error code in both branches, because this is really the same
                     // issue: we just special-case the message for type parameters to make it
                     // clearer.
@@ -853,19 +850,23 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
                         )
                         .emit();
                     } else {
-                        struct_span_err!(
+                        let mut diag = struct_span_err!(
                             tcx.sess,
                             hir_ty.span,
                             E0741,
                             "`{}` must be annotated with `#[derive(PartialEq, Eq)]` to be used as \
                             the type of a const parameter",
-                            ty,
-                        )
-                        .span_label(
-                            hir_ty.span,
-                            format!("`{ty}` doesn't derive both `PartialEq` and `Eq`"),
-                        )
-                        .emit();
+                            non_structural_match_ty.ty,
+                        );
+
+                        if ty == non_structural_match_ty.ty {
+                            diag.span_label(
+                                hir_ty.span,
+                                format!("`{ty}` doesn't derive both `PartialEq` and `Eq`"),
+                            );
+                        }
+
+                        diag.emit();
                     }
                 }
             } else {
@@ -966,7 +967,7 @@ fn check_associated_item(
     })
 }
 
-fn for_item<'tcx>(tcx: TyCtxt<'tcx>, item: &hir::Item<'_>) -> CheckWfFcxBuilder<'tcx> {
+pub(super) fn for_item<'tcx>(tcx: TyCtxt<'tcx>, item: &hir::Item<'_>) -> CheckWfFcxBuilder<'tcx> {
     for_id(tcx, item.def_id, item.span)
 }
 
@@ -1222,7 +1223,7 @@ fn check_impl<'tcx>(
                     fcx.body_id,
                     &trait_ref,
                     ast_trait_ref.path.span,
-                    Some(item),
+                    item,
                 );
                 debug!(?obligations);
                 for obligation in obligations {
@@ -1381,7 +1382,7 @@ fn check_where_clauses<'tcx, 'fcx>(
                 }
 
                 fn visit_const(&mut self, c: ty::Const<'tcx>) -> ControlFlow<Self::BreakTy> {
-                    if let ty::ConstKind::Param(param) = c.val() {
+                    if let ty::ConstKind::Param(param) = c.kind() {
                         self.params.insert(param.index);
                     }
                     c.super_visit_with(self)
@@ -1727,7 +1728,7 @@ fn check_variances_for_type_defn<'tcx>(
     identify_constrained_generic_params(tcx, ty_predicates, None, &mut constrained_parameters);
 
     // Lazily calculated because it is only needed in case of an error.
-    let explicitly_bounded_params = Lazy::new(|| {
+    let explicitly_bounded_params = LazyCell::new(|| {
         let icx = crate::collect::ItemCtxt::new(tcx, item.def_id.to_def_id());
         hir_generics
             .predicates

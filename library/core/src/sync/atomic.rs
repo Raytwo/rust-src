@@ -350,7 +350,7 @@ impl AtomicBool {
     /// # Examples
     ///
     /// ```
-    /// #![feature(atomic_from_mut, inline_const, scoped_threads)]
+    /// #![feature(atomic_from_mut, inline_const)]
     /// use std::sync::atomic::{AtomicBool, Ordering};
     ///
     /// let mut some_bools = [const { AtomicBool::new(false) }; 10];
@@ -381,7 +381,7 @@ impl AtomicBool {
     /// # Examples
     ///
     /// ```
-    /// #![feature(atomic_from_mut, scoped_threads)]
+    /// #![feature(atomic_from_mut)]
     /// use std::sync::atomic::{AtomicBool, Ordering};
     ///
     /// let mut some_bools = [false; 10];
@@ -1015,7 +1015,7 @@ impl<T> AtomicPtr<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(atomic_from_mut, inline_const, scoped_threads)]
+    /// #![feature(atomic_from_mut, inline_const)]
     /// use std::ptr::null_mut;
     /// use std::sync::atomic::{AtomicPtr, Ordering};
     ///
@@ -1052,7 +1052,7 @@ impl<T> AtomicPtr<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(atomic_from_mut, scoped_threads)]
+    /// #![feature(atomic_from_mut)]
     /// use std::ptr::null_mut;
     /// use std::sync::atomic::{AtomicPtr, Ordering};
     ///
@@ -1517,7 +1517,7 @@ macro_rules! atomic_int {
         #[$stable_debug]
         impl fmt::Debug for $atomic_type {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                fmt::Debug::fmt(&self.load(Ordering::SeqCst), f)
+                fmt::Debug::fmt(&self.load(Ordering::Relaxed), f)
             }
         }
 
@@ -1607,7 +1607,7 @@ macro_rules! atomic_int {
             /// # Examples
             ///
             /// ```
-            /// #![feature(atomic_from_mut, inline_const, scoped_threads)]
+            /// #![feature(atomic_from_mut, inline_const)]
             #[doc = concat!($extra_feature, "use std::sync::atomic::{", stringify!($atomic_type), ", Ordering};")]
             ///
             #[doc = concat!("let mut some_ints = [const { ", stringify!($atomic_type), "::new(0) }; 10];")]
@@ -1640,7 +1640,7 @@ macro_rules! atomic_int {
             /// # Examples
             ///
             /// ```
-            /// #![feature(atomic_from_mut, scoped_threads)]
+            /// #![feature(atomic_from_mut)]
             #[doc = concat!($extra_feature, "use std::sync::atomic::{", stringify!($atomic_type), ", Ordering};")]
             ///
             /// let mut some_ints = [0; 10];
@@ -2996,7 +2996,7 @@ pub fn compiler_fence(order: Ordering) {
 #[stable(feature = "atomic_debug", since = "1.3.0")]
 impl fmt::Debug for AtomicBool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.load(Ordering::SeqCst), f)
+        fmt::Debug::fmt(&self.load(Ordering::Relaxed), f)
     }
 }
 
@@ -3004,7 +3004,7 @@ impl fmt::Debug for AtomicBool {
 #[stable(feature = "atomic_debug", since = "1.3.0")]
 impl<T> fmt::Debug for AtomicPtr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.load(Ordering::SeqCst), f)
+        fmt::Debug::fmt(&self.load(Ordering::Relaxed), f)
     }
 }
 

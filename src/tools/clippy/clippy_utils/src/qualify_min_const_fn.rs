@@ -18,7 +18,7 @@ use std::borrow::Cow;
 
 type McfResult = Result<(), (Span, Cow<'static, str>)>;
 
-pub fn is_min_const_fn<'a, 'tcx>(tcx: TyCtxt<'tcx>, body: &'a Body<'tcx>, msrv: Option<&RustcVersion>) -> McfResult {
+pub fn is_min_const_fn<'a, 'tcx>(tcx: TyCtxt<'tcx>, body: &'a Body<'tcx>, msrv: Option<RustcVersion>) -> McfResult {
     let def_id = body.source.def_id();
     let mut current = def_id;
     loop {
@@ -121,24 +121,18 @@ fn check_rvalue<'tcx>(
 ) -> McfResult {
     match rvalue {
         Rvalue::ThreadLocalRef(_) => Err((span, "cannot access thread local storage in const fn".into())),
-        Rvalue::Repeat(operand, _) | Rvalue::Use(operand) => check_operand(tcx, operand, span, body),
         Rvalue::Len(place) | Rvalue::Discriminant(place) | Rvalue::Ref(_, _, place) | Rvalue::AddressOf(_, place) => {
             check_place(tcx, *place, span, body)
         },
-        Rvalue::Cast(CastKind::Misc, operand, cast_ty) => {
-            use rustc_middle::ty::cast::CastTy;
-            let cast_in = CastTy::from_ty(operand.ty(body, tcx)).expect("bad input type for cast");
-            let cast_out = CastTy::from_ty(*cast_ty).expect("bad output type for cast");
-            match (cast_in, cast_out) {
-                (CastTy::Ptr(_) | CastTy::FnPtr, CastTy::Int(_)) => {
-                    Err((span, "casting pointers to ints is unstable in const fn".into()))
-                },
-                _ => check_operand(tcx, operand, span, body),
-            }
-        },
-        Rvalue::Cast(CastKind::Pointer(PointerCast::MutToConstPointer | PointerCast::ArrayToPointer), operand, _) => {
-            check_operand(tcx, operand, span, body)
-        },
+        Rvalue::Repeat(operand, _)
+        | Rvalue::Use(operand)
+        | Rvalue::Cast(
+            CastKind::PointerFromExposedAddress
+            | CastKind::Misc
+            | CastKind::Pointer(PointerCast::MutToConstPointer | PointerCast::ArrayToPointer),
+            operand,
+            _,
+        ) => check_operand(tcx, operand, span, body),
         Rvalue::Cast(
             CastKind::Pointer(
                 PointerCast::UnsafeFnPointer | PointerCast::ClosureFnPointer(_) | PointerCast::ReifyFnPointer,
@@ -162,6 +156,9 @@ fn check_rvalue<'tcx>(
                 // We just can't allow trait objects until we have figured out trait method calls.
                 Err((span, "unsizing casts are not allowed in const fn".into()))
             }
+        },
+        Rvalue::Cast(CastKind::PointerExposeAddress, _, _) => {
+            Err((span, "casting pointers to ints is unstable in const fn".into()))
         },
         // binops are fine on integers
         Rvalue::BinaryOp(_, box (lhs, rhs)) | Rvalue::CheckedBinaryOp(_, box (lhs, rhs)) => {
@@ -268,7 +265,7 @@ fn check_terminator<'a, 'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &'a Body<'tcx>,
     terminator: &Terminator<'tcx>,
-    msrv: Option<&RustcVersion>,
+    msrv: Option<RustcVersion>,
 ) -> McfResult {
     let span = terminator.source_info.span;
     match &terminator.kind {
@@ -301,6 +298,7 @@ fn check_terminator<'a, 'tcx>(
             args,
             from_hir_call: _,
             destination: _,
+            target: _,
             cleanup: _,
             fn_span: _,
         } => {
@@ -352,7 +350,7 @@ fn check_terminator<'a, 'tcx>(
     }
 }
 
-fn is_const_fn(tcx: TyCtxt<'_>, def_id: DefId, msrv: Option<&RustcVersion>) -> bool {
+fn is_const_fn(tcx: TyCtxt<'_>, def_id: DefId, msrv: Option<RustcVersion>) -> bool {
     tcx.is_const_fn(def_id)
         && tcx.lookup_const_stability(def_id).map_or(true, |const_stab| {
             if let rustc_attr::StabilityLevel::Stable { since } = const_stab.level {
@@ -361,7 +359,7 @@ fn is_const_fn(tcx: TyCtxt<'_>, def_id: DefId, msrv: Option<&RustcVersion>) -> b
                 // as a part of an unimplemented MSRV check https://github.com/rust-lang/rust/issues/65262.
                 crate::meets_msrv(
                     msrv,
-                    &RustcVersion::parse(since.as_str())
+                    RustcVersion::parse(since.as_str())
                         .expect("`rustc_attr::StabilityLevel::Stable::since` is ill-formatted"),
                 )
             } else {

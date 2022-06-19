@@ -34,14 +34,14 @@ declare_clippy_lint! {
     ///
     /// ### Example
     /// ```rust,ignore
-    /// // Bad
     /// xs.map(|x| foo(x))
+    /// ```
     ///
-    /// // Good
+    /// Use instead:
+    /// ```rust,ignore
+    /// // where `foo(_)` is a plain function that takes the exact argument type of `x`.
     /// xs.map(foo)
     /// ```
-    /// where `foo(_)` is a plain function that takes the exact argument type of
-    /// `x`.
     #[clippy::version = "pre 1.29.0"]
     pub REDUNDANT_CLOSURE,
     style,
@@ -78,7 +78,7 @@ impl<'tcx> LateLintPass<'tcx> for EtaReduction {
             return;
         }
         let body = match expr.kind {
-            ExprKind::Closure(_, _, id, _, _) => cx.tcx.hir().body(id),
+            ExprKind::Closure { body, .. } => cx.tcx.hir().body(body),
             _ => return,
         };
         if body.value.span.from_expansion() {

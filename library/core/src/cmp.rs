@@ -61,8 +61,8 @@ use self::Ordering::*;
 ///
 /// This trait can be used with `#[derive]`. When `derive`d on structs, two
 /// instances are equal if all fields are equal, and not equal if any fields
-/// are not equal. When `derive`d on enums, each variant is equal to itself
-/// and not equal to the other variants.
+/// are not equal. When `derive`d on enums, two instances are equal if they
+/// are the same variant and all fields are equal.
 ///
 /// ## How can I implement `PartialEq`?
 ///
@@ -214,6 +214,7 @@ use self::Ordering::*;
         append_const_msg,
     )
 )]
+#[cfg_attr(not(bootstrap), const_trait)]
 #[rustc_diagnostic_item = "PartialEq"]
 pub trait PartialEq<Rhs: ?Sized = Self> {
     /// This method tests for `self` and `other` values to be equal, and is used
@@ -226,7 +227,7 @@ pub trait PartialEq<Rhs: ?Sized = Self> {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[default_method_body_is_const]
+    #[cfg_attr(bootstrap, default_method_body_is_const)]
     fn ne(&self, other: &Rhs) -> bool {
         !self.eq(other)
     }
@@ -1053,6 +1054,7 @@ impl PartialOrd for Ordering {
         append_const_msg,
     )
 )]
+#[cfg_attr(not(bootstrap), const_trait)]
 #[rustc_diagnostic_item = "PartialOrd"]
 pub trait PartialOrd<Rhs: ?Sized = Self>: PartialEq<Rhs> {
     /// This method returns an ordering between `self` and `other` values if one exists.
@@ -1096,7 +1098,7 @@ pub trait PartialOrd<Rhs: ?Sized = Self>: PartialEq<Rhs> {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[default_method_body_is_const]
+    #[cfg_attr(bootstrap, default_method_body_is_const)]
     fn lt(&self, other: &Rhs) -> bool {
         matches!(self.partial_cmp(other), Some(Less))
     }
@@ -1116,7 +1118,7 @@ pub trait PartialOrd<Rhs: ?Sized = Self>: PartialEq<Rhs> {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[default_method_body_is_const]
+    #[cfg_attr(bootstrap, default_method_body_is_const)]
     fn le(&self, other: &Rhs) -> bool {
         // Pattern `Some(Less | Eq)` optimizes worse than negating `None | Some(Greater)`.
         // FIXME: The root cause was fixed upstream in LLVM with:
@@ -1139,7 +1141,7 @@ pub trait PartialOrd<Rhs: ?Sized = Self>: PartialEq<Rhs> {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[default_method_body_is_const]
+    #[cfg_attr(bootstrap, default_method_body_is_const)]
     fn gt(&self, other: &Rhs) -> bool {
         matches!(self.partial_cmp(other), Some(Greater))
     }
@@ -1159,7 +1161,7 @@ pub trait PartialOrd<Rhs: ?Sized = Self>: PartialEq<Rhs> {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[default_method_body_is_const]
+    #[cfg_attr(bootstrap, default_method_body_is_const)]
     fn ge(&self, other: &Rhs) -> bool {
         matches!(self.partial_cmp(other), Some(Greater | Equal))
     }
@@ -1347,7 +1349,7 @@ mod impls {
             impl PartialOrd for $t {
                 #[inline]
                 fn partial_cmp(&self, other: &$t) -> Option<Ordering> {
-                    match (self <= other, self >= other) {
+                    match (*self <= *other, *self >= *other) {
                         (false, false) => None,
                         (false, true) => Some(Greater),
                         (true, false) => Some(Less),

@@ -70,7 +70,7 @@ function printTab(nb) {
     });
     if (foundCurrentTab && foundCurrentResultSet) {
         searchState.currentTab = nb;
-    } else if (nb != 0) {
+    } else if (nb !== 0) {
         printTab(0);
     }
 }
@@ -200,7 +200,7 @@ function initSearch(rawSearchIndex) {
      * @return {boolean}
      */
     function isPathStart(parserState) {
-        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == "::";
+        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) === "::";
     }
 
     /**
@@ -211,7 +211,7 @@ function initSearch(rawSearchIndex) {
      * @return {boolean}
      */
     function isReturnArrow(parserState) {
-        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) == "->";
+        return parserState.userQuery.slice(parserState.pos, parserState.pos + 2) === "->";
     }
 
     /**
@@ -1333,10 +1333,7 @@ function initSearch(rawSearchIndex) {
             if (searchWord.indexOf(elem.pathLast) > -1 ||
                 row.normalizedName.indexOf(elem.pathLast) > -1
             ) {
-                // filter type: ... queries
-                if (!results_others[fullId] !== undefined) {
-                    index = row.normalizedName.indexOf(elem.pathLast);
-                }
+                index = row.normalizedName.indexOf(elem.pathLast);
             }
             lev = levenshtein(searchWord, elem.pathLast);
             if (lev > 0 && elem.pathLast.length > 2 && searchWord.indexOf(elem.pathLast) > -1) {
@@ -1726,7 +1723,7 @@ function initSearch(rawSearchIndex) {
             crates = " in <select id=\"crate-search\"><option value=\"All crates\">" +
                 "All crates</option>";
             for (const c of window.ALL_CRATES) {
-                crates += `<option value="${c}" ${c == filterCrates && "selected"}>${c}</option>`;
+                crates += `<option value="${c}" ${c === filterCrates && "selected"}>${c}</option>`;
             }
             crates += "</select>";
         }

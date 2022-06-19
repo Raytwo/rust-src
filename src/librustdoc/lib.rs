@@ -11,7 +11,7 @@
 #![feature(drain_filter)]
 #![feature(let_chains)]
 #![feature(let_else)]
-#![feature(nll)]
+#![cfg_attr(bootstrap, feature(nll))]
 #![feature(test)]
 #![feature(never_type)]
 #![feature(once_cell)]
@@ -36,7 +36,6 @@ extern crate tracing;
 // Dependencies listed in Cargo.toml do not need `extern crate`.
 
 extern crate rustc_ast;
-extern crate rustc_ast_lowering;
 extern crate rustc_ast_pretty;
 extern crate rustc_attr;
 extern crate rustc_const_eval;
@@ -70,9 +69,7 @@ extern crate test;
 // See docs in https://github.com/rust-lang/rust/blob/master/compiler/rustc/src/main.rs
 // about jemalloc.
 #[cfg(feature = "jemalloc")]
-extern crate tikv_jemalloc_sys;
-#[cfg(feature = "jemalloc")]
-use tikv_jemalloc_sys as jemalloc_sys;
+extern crate jemalloc_sys;
 
 use std::default::Default;
 use std::env::{self, VarError};

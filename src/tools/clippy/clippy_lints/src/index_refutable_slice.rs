@@ -14,7 +14,6 @@ use rustc_middle::ty;
 use rustc_semver::RustcVersion;
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::{symbol::Ident, Span};
-use std::convert::TryInto;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -46,7 +45,7 @@ declare_clippy_lint! {
     ///     println!("{}", first);
     /// }
     /// ```
-    #[clippy::version = "1.58.0"]
+    #[clippy::version = "1.59.0"]
     pub INDEX_REFUTABLE_SLICE,
     nursery,
     "avoid indexing on slices which could be destructed"
@@ -75,7 +74,7 @@ impl<'tcx> LateLintPass<'tcx> for IndexRefutableSlice {
             if !expr.span.from_expansion() || is_expn_of(expr.span, "if_chain").is_some();
             if let Some(IfLet {let_pat, if_then, ..}) = IfLet::hir(cx, expr);
             if !is_lint_allowed(cx, INDEX_REFUTABLE_SLICE, expr.hir_id);
-            if meets_msrv(self.msrv.as_ref(), &msrvs::SLICE_PATTERNS);
+            if meets_msrv(self.msrv, msrvs::SLICE_PATTERNS);
 
             let found_slices = find_slice_values(cx, let_pat);
             if !found_slices.is_empty();

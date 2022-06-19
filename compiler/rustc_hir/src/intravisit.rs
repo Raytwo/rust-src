@@ -466,7 +466,7 @@ pub trait Visitor<'v>: Sized {
     fn visit_assoc_type_binding(&mut self, type_binding: &'v TypeBinding<'v>) {
         walk_assoc_type_binding(self, type_binding)
     }
-    fn visit_attribute(&mut self, _id: HirId, _attr: &'v Attribute) {}
+    fn visit_attribute(&mut self, _attr: &'v Attribute) {}
     fn visit_associated_item_kind(&mut self, kind: &'v AssocItemKind) {
         walk_associated_item_kind(self, kind);
     }
@@ -510,11 +510,11 @@ pub fn walk_label<'v, V: Visitor<'v>>(visitor: &mut V, label: &'v Label) {
 pub fn walk_lifetime<'v, V: Visitor<'v>>(visitor: &mut V, lifetime: &'v Lifetime) {
     visitor.visit_id(lifetime.hir_id);
     match lifetime.name {
-        LifetimeName::Param(ParamName::Plain(ident)) => {
+        LifetimeName::Param(_, ParamName::Plain(ident)) => {
             visitor.visit_ident(ident);
         }
-        LifetimeName::Param(ParamName::Fresh(_))
-        | LifetimeName::Param(ParamName::Error)
+        LifetimeName::Param(_, ParamName::Fresh)
+        | LifetimeName::Param(_, ParamName::Error)
         | LifetimeName::Static
         | LifetimeName::Error
         | LifetimeName::Implicit
@@ -879,7 +879,7 @@ pub fn walk_generic_param<'v, V: Visitor<'v>>(visitor: &mut V, param: &'v Generi
     visitor.visit_id(param.hir_id);
     match param.name {
         ParamName::Plain(ident) => visitor.visit_ident(ident),
-        ParamName::Error | ParamName::Fresh(_) => {}
+        ParamName::Error | ParamName::Fresh => {}
     }
     match param.kind {
         GenericParamKind::Lifetime { .. } => {}
@@ -1168,14 +1168,13 @@ pub fn walk_expr<'v, V: Visitor<'v>>(visitor: &mut V, expression: &'v Expr<'v>) 
             visitor.visit_expr(subexpression);
             walk_list!(visitor, visit_arm, arms);
         }
-        ExprKind::Closure(_, ref function_declaration, body, _fn_decl_span, _gen) => visitor
-            .visit_fn(
-                FnKind::Closure,
-                function_declaration,
-                body,
-                expression.span,
-                expression.hir_id,
-            ),
+        ExprKind::Closure {
+            ref fn_decl,
+            body,
+            capture_clause: _,
+            fn_decl_span: _,
+            movability: _,
+        } => visitor.visit_fn(FnKind::Closure, fn_decl, body, expression.span, expression.hir_id),
         ExprKind::Block(ref block, ref opt_label) => {
             walk_list!(visitor, visit_label, opt_label);
             visitor.visit_block(block);

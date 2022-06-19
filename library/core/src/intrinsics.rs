@@ -930,6 +930,9 @@ extern "rust-intrinsic" {
     /// fn foo() -> i32 {
     ///     0
     /// }
+    /// // Crucially, we `as`-cast to a raw pointer before `transmute`ing to a function pointer.
+    /// // This avoids an integer-to-pointer `transmute`, which can be problematic.
+    /// // Transmuting between raw pointers and function pointers (i.e., two pointer types) is fine.
     /// let pointer = foo as *const ();
     /// let function = unsafe {
     ///     std::mem::transmute::<*const (), fn() -> i32>(pointer)
@@ -1159,7 +1162,7 @@ extern "rust-intrinsic" {
     ///
     /// The stabilized version of this intrinsic is [`mem::needs_drop`](crate::mem::needs_drop).
     #[rustc_const_stable(feature = "const_needs_drop", since = "1.40.0")]
-    pub fn needs_drop<T>() -> bool;
+    pub fn needs_drop<T: ?Sized>() -> bool;
 
     /// Calculates the offset from a pointer.
     ///
@@ -1905,7 +1908,6 @@ extern "rust-intrinsic" {
 
     /// See documentation of `<*const T>::sub_ptr` for details.
     #[rustc_const_unstable(feature = "const_ptr_offset_from", issue = "92980")]
-    #[cfg(not(bootstrap))]
     pub fn ptr_offset_from_unsigned<T>(ptr: *const T, base: *const T) -> usize;
 
     /// See documentation of `<*const T>::guaranteed_eq` for details.
@@ -2116,11 +2118,11 @@ pub(crate) fn is_nonoverlapping<T>(src: *const T, dst: *const T, count: usize) -
 /// [`Vec::append`]: ../../std/vec/struct.Vec.html#method.append
 #[doc(alias = "memcpy")]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
+#[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.63.0")]
 #[inline]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
-        #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
+        #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.63.0")]
         pub fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize);
     }
 
@@ -2198,11 +2200,11 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 /// ```
 #[doc(alias = "memmove")]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
+#[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.63.0")]
 #[inline]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
-        #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
+        #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.63.0")]
         fn copy<T>(src: *const T, dst: *mut T, count: usize);
     }
 
@@ -2285,6 +2287,7 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 /// // Now the box is fine
 /// assert_eq!(*v, 42);
 /// ```
+#[doc(alias = "memset")]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
 #[inline]
@@ -2360,6 +2363,7 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
 #[rustc_const_unstable(feature = "const_eval_select", issue = "none")]
 #[lang = "const_eval_select"]
 #[rustc_do_not_const_check]
+#[inline]
 pub const unsafe fn const_eval_select<ARG, F, G, RET>(
     arg: ARG,
     _called_in_const: F,
@@ -2389,12 +2393,4 @@ where
     G: FnOnce<ARG, Output = RET> + ~const Destruct,
 {
     called_in_const.call_once(arg)
-}
-
-/// Bootstrap polyfill
-#[cfg(bootstrap)]
-pub const unsafe fn ptr_offset_from_unsigned<T>(ptr: *const T, base: *const T) -> usize {
-    // SAFETY: we have stricter preconditions than `ptr_offset_from`, so can
-    // call it, and its output has to be positive, so we can just cast.
-    unsafe { ptr_offset_from(ptr, base) as _ }
 }

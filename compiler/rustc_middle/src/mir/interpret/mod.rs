@@ -56,7 +56,7 @@ macro_rules! err_machine_stop {
 // In the `throw_*` macros, avoid `return` to make them work with `try {}`.
 #[macro_export]
 macro_rules! throw_unsup {
-    ($($tt:tt)*) => { Err::<!, _>(err_unsup!($($tt)*))? };
+    ($($tt:tt)*) => { do yeet err_unsup!($($tt)*) };
 }
 
 #[macro_export]
@@ -66,12 +66,12 @@ macro_rules! throw_unsup_format {
 
 #[macro_export]
 macro_rules! throw_inval {
-    ($($tt:tt)*) => { Err::<!, _>(err_inval!($($tt)*))? };
+    ($($tt:tt)*) => { do yeet err_inval!($($tt)*) };
 }
 
 #[macro_export]
 macro_rules! throw_ub {
-    ($($tt:tt)*) => { Err::<!, _>(err_ub!($($tt)*))? };
+    ($($tt:tt)*) => { do yeet err_ub!($($tt)*) };
 }
 
 #[macro_export]
@@ -81,12 +81,12 @@ macro_rules! throw_ub_format {
 
 #[macro_export]
 macro_rules! throw_exhaust {
-    ($($tt:tt)*) => { Err::<!, _>(err_exhaust!($($tt)*))? };
+    ($($tt:tt)*) => { do yeet err_exhaust!($($tt)*) };
 }
 
 #[macro_export]
 macro_rules! throw_machine_stop {
-    ($($tt:tt)*) => { Err::<!, _>(err_machine_stop!($($tt)*))? };
+    ($($tt:tt)*) => { do yeet err_machine_stop!($($tt)*) };
 }
 
 mod allocation;
@@ -203,31 +203,30 @@ enum AllocDiscriminant {
     Static,
 }
 
-pub fn specialized_encode_alloc_id<'tcx, E: TyEncoder<'tcx>>(
+pub fn specialized_encode_alloc_id<'tcx, E: TyEncoder<I = TyCtxt<'tcx>>>(
     encoder: &mut E,
     tcx: TyCtxt<'tcx>,
     alloc_id: AllocId,
-) -> Result<(), E::Error> {
+) {
     match tcx.global_alloc(alloc_id) {
         GlobalAlloc::Memory(alloc) => {
             trace!("encoding {:?} with {:#?}", alloc_id, alloc);
-            AllocDiscriminant::Alloc.encode(encoder)?;
-            alloc.encode(encoder)?;
+            AllocDiscriminant::Alloc.encode(encoder);
+            alloc.encode(encoder);
         }
         GlobalAlloc::Function(fn_instance) => {
             trace!("encoding {:?} with {:#?}", alloc_id, fn_instance);
-            AllocDiscriminant::Fn.encode(encoder)?;
-            fn_instance.encode(encoder)?;
+            AllocDiscriminant::Fn.encode(encoder);
+            fn_instance.encode(encoder);
         }
         GlobalAlloc::Static(did) => {
             assert!(!tcx.is_thread_local_static(did));
             // References to statics doesn't need to know about their allocations,
             // just about its `DefId`.
-            AllocDiscriminant::Static.encode(encoder)?;
-            did.encode(encoder)?;
+            AllocDiscriminant::Static.encode(encoder);
+            did.encode(encoder);
         }
     }
-    Ok(())
 }
 
 // Used to avoid infinite recursion when decoding cyclic allocations.
@@ -277,7 +276,7 @@ impl<'s> AllocDecodingSession<'s> {
     /// Decodes an `AllocId` in a thread-safe way.
     pub fn decode_alloc_id<'tcx, D>(&self, decoder: &mut D) -> AllocId
     where
-        D: TyDecoder<'tcx>,
+        D: TyDecoder<I = TyCtxt<'tcx>>,
     {
         // Read the index of the allocation.
         let idx = usize::try_from(decoder.read_u32()).unwrap();
@@ -305,7 +304,7 @@ impl<'s> AllocDecodingSession<'s> {
                         AllocDiscriminant::Alloc => {
                             // If this is an allocation, we need to reserve an
                             // `AllocId` so we can decode cyclic graphs.
-                            let alloc_id = decoder.tcx().reserve_alloc_id();
+                            let alloc_id = decoder.interner().reserve_alloc_id();
                             *entry =
                                 State::InProgress(TinyList::new_single(self.session_id), alloc_id);
                             Some(alloc_id)
@@ -349,7 +348,7 @@ impl<'s> AllocDecodingSession<'s> {
                     // We already have a reserved `AllocId`.
                     let alloc_id = alloc_id.unwrap();
                     trace!("decoded alloc {:?}: {:#?}", alloc_id, alloc);
-                    decoder.tcx().set_alloc_id_same_memory(alloc_id, alloc);
+                    decoder.interner().set_alloc_id_same_memory(alloc_id, alloc);
                     alloc_id
                 }
                 AllocDiscriminant::Fn => {
@@ -357,7 +356,7 @@ impl<'s> AllocDecodingSession<'s> {
                     trace!("creating fn alloc ID");
                     let instance = ty::Instance::decode(decoder);
                     trace!("decoded fn alloc instance: {:?}", instance);
-                    let alloc_id = decoder.tcx().create_fn_alloc(instance);
+                    let alloc_id = decoder.interner().create_fn_alloc(instance);
                     alloc_id
                 }
                 AllocDiscriminant::Static => {
@@ -365,7 +364,7 @@ impl<'s> AllocDecodingSession<'s> {
                     trace!("creating extern static alloc ID");
                     let did = <DefId as Decodable<D>>::decode(decoder);
                     trace!("decoded static def-ID: {:?}", did);
-                    let alloc_id = decoder.tcx().create_static_alloc(did);
+                    let alloc_id = decoder.interner().create_static_alloc(did);
                     alloc_id
                 }
             }
