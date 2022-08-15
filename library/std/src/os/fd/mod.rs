@@ -4,12 +4,15 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 // `RawFd`, `AsRawFd`, etc.
+#[cfg(not(target_os = "switch"))]
 pub mod raw;
 
 // `OwnedFd`, `AsFd`, etc.
+#[cfg(not(target_os = "switch"))]
 pub mod owned;
 
 // Implementations for `AsRawFd` etc. for network types.
+#[cfg(not(target_os = "switch"))]
 mod net;
 
 #[cfg(test)]

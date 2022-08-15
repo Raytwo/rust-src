@@ -5,7 +5,7 @@
 use crate::fs;
 use crate::io;
 use crate::os::raw;
-use crate::sys_common::{AsInner, IntoInner};
+//use crate::sys_common::{AsInner, IntoInner};
 
 /// Raw file descriptors.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -146,3 +146,86 @@ impl FromRawFd for RawFd {
         fd
     }
 }
+
+/// An owned file descriptor.
+///
+/// This closes the file descriptor on drop.
+///
+/// This uses `repr(transparent)` and has the representation of a host file
+/// descriptor, so it can be used in FFI in places where a file descriptor is
+/// passed as a consumed argument or returned as an owned value, and it never
+/// has the value `-1`.
+#[repr(transparent)]
+#[rustc_layout_scalar_valid_range_start(0)]
+// libstd/os/raw/mod.rs assures me that every libstd-supported platform has a
+// 32-bit c_int. Below is -2, in two's complement, but that only works out
+// because c_int is 32 bits.
+#[rustc_layout_scalar_valid_range_end(0xFF_FF_FF_FE)]
+#[rustc_nonnull_optimization_guaranteed]
+#[stable(feature = "io_safety", since = "1.63.0")]
+pub struct OwnedFd {
+    pub fd: RawFd,
+}
+
+
+#[stable(feature = "io_safety", since = "1.63.0")]
+impl FromRawFd for OwnedFd {
+    /// Constructs a new instance of `Self` from the given raw file descriptor.
+    ///
+    /// # Safety
+    ///
+    /// The resource pointed to by `fd` must be open and suitable for assuming
+    /// ownership. The resource must not require any cleanup other than `close`.
+    #[inline]
+    unsafe fn from_raw_fd(fd: RawFd) -> Self {
+        assert_ne!(fd, u32::MAX as RawFd);
+        // SAFETY: we just asserted that the value is in the valid range and isn't `-1` (the only value bigger than `0xFF_FF_FF_FE` unsigned)
+        unsafe { Self { fd } }
+    }
+}
+
+//use crate::os::fd::raw::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use crate::sys_common::{self, AsInner, FromInner, IntoInner};
+use crate::{net, sys};
+
+macro_rules! impl_as_raw_fd {
+    ($($t:ident)*) => {$(
+        #[stable(feature = "rust1", since = "1.0.0")]
+        impl AsRawFd for net::$t {
+            #[inline]
+            fn as_raw_fd(&self) -> RawFd {
+                self.as_inner().socket().as_raw_fd()
+            }
+        }
+    )*};
+}
+impl_as_raw_fd! { TcpStream TcpListener UdpSocket }
+
+macro_rules! impl_from_raw_fd {
+    ($($t:ident)*) => {$(
+        #[stable(feature = "from_raw_os", since = "1.1.0")]
+        impl FromRawFd for net::$t {
+            #[inline]
+            unsafe fn from_raw_fd(fd: RawFd) -> net::$t {
+                unsafe {
+                    let socket = sys::net::Socket::from_inner(OwnedFd::from_raw_fd(fd).fd);
+                    net::$t::from_inner(sys_common::net::$t::from_inner(socket))
+                }
+            }
+        }
+    )*};
+}
+impl_from_raw_fd! { TcpStream TcpListener UdpSocket }
+
+macro_rules! impl_into_raw_fd {
+    ($($t:ident)*) => {$(
+        #[stable(feature = "into_raw_os", since = "1.4.0")]
+        impl IntoRawFd for net::$t {
+            #[inline]
+            fn into_raw_fd(self) -> RawFd {
+                self.into_inner().into_socket().into_inner()//into_inner().into_raw_fd()
+            }
+        }
+    )*};
+}
+impl_into_raw_fd! { TcpStream TcpListener UdpSocket }

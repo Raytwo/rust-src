@@ -1,5 +1,11 @@
 use crate::os::fd::owned::OwnedFd;
+
+
+#[cfg(not(target_os = "switch"))]
 use crate::os::fd::raw::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+#[cfg(target_os = "switch")]
+use crate::os::switch::*;
+
 use crate::sys_common::{self, AsInner, FromInner, IntoInner};
 use crate::{net, sys};
 
