@@ -331,3 +331,36 @@ macro_rules! assert_approx_eq {
         assert!((*a - *b).abs() < 1.0e-6, "{} is not approximately equal to {}", *a, *b);
     }};
 }
+
+/// Only to be used internally by skyline-rs
+#[macro_export]
+#[cfg(target_os = "switch")]
+#[allow_internal_unstable(global_asm)]
+#[stable(feature = "rust1", since = "1.0.0")]
+macro_rules! nro_header {
+    () => {
+        std::arch::global_asm!("
+        .section .nro_header
+        .global __nro_header_start
+        .word 0
+        .word _mod_header
+        .word 0
+        .word 0
+        .section .rodata.mod0
+        .global _mod_header
+        _mod_header:
+            .ascii \"MOD0\"
+            .word __dynamic_start - _mod_header
+            .word __bss_start - _mod_header
+            .word __bss_end - _mod_header
+            .word __eh_frame_hdr_start - _mod_header
+            .word __eh_frame_hdr_end - _mod_header
+            .word __nx_module_runtime - _mod_header // runtime-generated module object offset
+        .global IS_NRO
+        IS_NRO:
+            .word 1
+        .section .bss.module_runtime
+        .space 0xD0
+        ");
+    }
+}

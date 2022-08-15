@@ -15,7 +15,6 @@ cfg-if = { version = "0.1.8", features = ['rustc-dep-of-std'] }
 panic_unwind = { path = "../panic_unwind", optional = true }
 panic_abort = { path = "../panic_abort" }
 core = { path = "../core" }
-libc = { version = "0.2.126", default-features = false, features = ['rustc-dep-of-std'] }
 compiler_builtins = { version = "0.1.73" }
 profiler_builtins = { path = "../profiler_builtins", optional = true }
 unwind = { path = "../unwind" }
@@ -46,6 +45,13 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
 
 [target.wasm32-wasi.dependencies]
 wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features = false }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+libc = { version = "0.2.79", default-features = false, features = ['rustc-dep-of-std'] }
+
+[target.aarch64-skyline-switch.dependencies]
+libc-nnsdk = { git = "https://github.com/ultimate-research/libc-nnsdk.git", features = ['rustc-dep-of-std']}
+nnsdk = { git = "https://github.com/inspier/nnsdk-rs.git", features = ["rustc-dep-of-std"] }
 
 [features]
 backtrace = [

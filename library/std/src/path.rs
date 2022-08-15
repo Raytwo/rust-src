@@ -2088,6 +2088,14 @@ impl Path {
         if cfg!(target_os = "redox") {
             // FIXME: Allow Redox prefixes
             self.has_root() || has_redox_scheme(self.as_u8_slice())
+        } else if cfg!(target_os = "switch") {
+            if let Some(Component::Normal(component)) = self.components().next() {
+                component.to_str()
+                    .map(|component| component.contains(":"))
+                    .unwrap_or(false)
+            } else {
+                false
+            }
         } else {
             self.has_root() && (cfg!(any(unix, target_os = "wasi")) || self.prefix().is_some())
         }

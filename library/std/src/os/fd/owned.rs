@@ -3,7 +3,12 @@
 #![stable(feature = "io_safety", since = "1.63.0")]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(not(target_os = "switch"))]
 use super::raw::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+#[cfg(target_os = "switch")]
+use crate::os::switch::*;
+#[cfg(target_os = "switch")]
+use crate::os::fd::owned::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use crate::fmt;
 use crate::fs;
 use crate::marker::PhantomData;
@@ -254,19 +259,40 @@ impl AsFd for OwnedFd {
     }
 }
 
+#[cfg(not(target_os = "switch"))]
 #[stable(feature = "io_safety", since = "1.63.0")]
 impl AsFd for fs::File {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
-        self.as_inner().as_fd()
+        self.into_inner().as_fd()
     }
 }
 
+#[cfg(target_os = "switch")]
+#[stable(feature = "io_safety", since = "1.63.0")]
+impl AsFd for fs::File {
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.as_fd()
+    }
+}
+
+#[cfg(not(target_os = "switch"))]
 #[stable(feature = "io_safety", since = "1.63.0")]
 impl From<fs::File> for OwnedFd {
     #[inline]
     fn from(file: fs::File) -> OwnedFd {
         file.into_inner().into_inner().into_inner()
+    }
+}
+
+
+#[cfg(target_os = "switch")]
+#[stable(feature = "io_safety", since = "1.63.0")]
+impl From<fs::File> for OwnedFd {
+    #[inline]
+    fn from(file: fs::File) -> OwnedFd {
+        file.into_inner()
     }
 }
 

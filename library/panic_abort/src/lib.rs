@@ -41,6 +41,18 @@ pub unsafe fn __rust_start_panic(_payload: *mut &mut dyn BoxMeUp) -> u32 {
             unsafe fn abort() -> ! {
                 libc::abort();
             }
+        } else if #[cfg(target_os = "switch")] {
+            unsafe fn abort() -> ! {
+                extern "C" {
+                    #[link_name = "\u{1}_ZN2nn2os11SleepThreadENS_8TimeSpanE"]
+                    fn sleep(amt: TimeSpan);
+                }
+
+                #[repr(C)] struct TimeSpan { pub nanoseconds: u64 }
+
+                sleep(TimeSpan { nanoseconds: 100000000 });
+                libc::abort();
+            }
         } else if #[cfg(any(target_os = "hermit",
                             target_os = "solid_asp3",
                             all(target_vendor = "fortanix", target_env = "sgx")

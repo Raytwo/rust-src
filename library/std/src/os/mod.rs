@@ -147,5 +147,18 @@ pub mod solid;
 #[cfg(target_os = "vxworks")]
 pub mod vxworks;
 
-#[cfg(any(unix, target_os = "wasi", doc))]
-mod fd;
+#[cfg(target_os = "switch")]
+pub mod switch;
+
+#[cfg(any(unix, target_os = "wasi", target_os = "switch", doc))]
+pub mod fd;
+
+#[cfg(doc)]
+#[unstable(issue = "none", feature = "std_internals")]
+pub mod switch {
+    pub mod ffi {
+        #![stable(feature = "rust1", since = "1.0.0")]
+        #[stable(feature = "rust1", since = "1.0.0")]
+        pub use crate::sys_common::os_str_bytes::*;
+    }
+}

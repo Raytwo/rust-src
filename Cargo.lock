@@ -2138,6 +2138,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "libc-nnsdk"
+version = "0.0.1"
+source = "git+https://github.com/inspier/libc-nnsdk.git#03ad16e9092631e26c589627330e21a61882b5f2"
+dependencies = [
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "libc-nnsdk"
+version = "0.0.1"
+source = "git+https://github.com/ultimate-research/libc-nnsdk.git#98c11e074317f2b45b6387840ff3c391275f4ad5"
+dependencies = [
+ "rustc-std-workspace-core",
+]
+
+[[package]]
 name = "libgit2-sys"
 version = "0.13.2+1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2491,6 +2507,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 
 [[package]]
+name = "nnsdk"
+version = "0.1.0"
+source = "git+https://github.com/inspier/nnsdk-rs.git#9e0c1c2c28f1bf42f8595d030e61a6bf271d39c7"
+dependencies = [
+ "compiler_builtins",
+ "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk.git)",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,7 +2720,7 @@ dependencies = [
  "cfg-if 0.1.10",
  "compiler_builtins",
  "core",
- "libc",
+ "libc-nnsdk 0.0.1 (git+https://github.com/inspier/libc-nnsdk.git)",
 ]
 
 [[package]]
@@ -4964,9 +4990,9 @@ checksum = "da73c8f77aebc0e40c300b93f0a5f1bece7a248a36eee287d4e095f35c7b7d6e"
 
 [[package]]
 name = "snapbox"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1f212b806d6f56d19838e36a0aaa7e79a0bc9ca177e873fb87651ad92f983e2"
+checksum = "767a1d5da232b6959cd1bd5c9e8db8a7cce09c3038e89deedb49a549a2aefd93"
 dependencies = [
  "concolor",
  "content_inspector",
@@ -5035,7 +5061,9 @@ dependencies = [
  "hashbrown 0.12.0",
  "hermit-abi 0.2.0",
  "libc",
+ "libc-nnsdk 0.0.1 (git+https://github.com/ultimate-research/libc-nnsdk.git)",
  "miniz_oxide",
+ "nnsdk",
  "object 0.26.2",
  "panic_abort",
  "panic_unwind",
@@ -5401,9 +5429,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba98375fd631b83696f87c64e4ed8e29e6a1f3404d6aed95fa95163bad38e705"
+checksum = "5376256e44f2443f8896ac012507c19a012df0fe8758b55246ae51a2279db51f"
 dependencies = [
  "combine",
  "indexmap",
