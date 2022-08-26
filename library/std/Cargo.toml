@@ -52,7 +52,7 @@ libc = { version = "0.2.79", default-features = false, features = ['rustc-dep-of
 
 [target.aarch64-skyline-switch.dependencies]
 libc-nnsdk = { git = "https://github.com/ultimate-research/libc-nnsdk.git", features = ['rustc-dep-of-std']}
-nnsdk = { git = "https://github.com/inspier/nnsdk-rs.git", features = ["rustc-dep-of-std"] }
+nnsdk = { git = "https://github.com/ultimate-research/nnsdk-rs.git", features = ["rustc-dep-of-std"] }
 
 [features]
 backtrace = [
