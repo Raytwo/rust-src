@@ -148,8 +148,21 @@ pub mod vxworks;
 #[cfg(target_os = "watchos")]
 pub(crate) mod watchos;
 
+#[cfg(target_os = "switch")]
+pub mod switch;
+
 #[cfg(any(unix, target_os = "wasi", doc))]
 pub mod fd;
 
 #[cfg(any(target_os = "linux", target_os = "android", doc))]
 mod net;
+
+#[cfg(doc)]
+#[unstable(issue = "none", feature = "std_internals")]
+pub mod switch {
+    pub mod ffi {
+        #![stable(feature = "rust1", since = "1.0.0")]
+        #[stable(feature = "rust1", since = "1.0.0")]
+        pub use crate::sys_common::os_str_bytes::*;
+    }
+}

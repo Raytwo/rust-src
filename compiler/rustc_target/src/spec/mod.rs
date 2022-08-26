@@ -1236,6 +1236,8 @@ supported_targets! {
     ("bpfeb-unknown-none", bpfeb_unknown_none),
     ("bpfel-unknown-none", bpfel_unknown_none),
 
+    ("aarch64-skyline-switch", aarch64_skyline_switch),
+
     ("armv6k-nintendo-3ds", armv6k_nintendo_3ds),
 
     ("aarch64-nintendo-switch-freestanding", aarch64_nintendo_switch_freestanding),

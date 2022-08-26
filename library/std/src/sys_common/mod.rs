@@ -36,6 +36,7 @@ pub mod thread_info;
 pub mod thread_local_dtor;
 pub mod thread_parker;
 pub mod wtf8;
+pub mod net;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -45,7 +46,7 @@ cfg_if::cfg_if! {
     }
 }
 
-cfg_if::cfg_if! {
+/* cfg_if::cfg_if! {
     if #[cfg(any(target_os = "l4re",
                  target_os = "hermit",
                  feature = "restricted-std",
@@ -55,7 +56,7 @@ cfg_if::cfg_if! {
     } else {
         pub mod net;
     }
-}
+} */
 
 // common error constructors
 
