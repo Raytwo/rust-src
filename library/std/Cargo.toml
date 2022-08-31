@@ -51,8 +51,8 @@ wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features =
 libc = { version = "0.2.79", default-features = false, features = ['rustc-dep-of-std'] }
 
 [target.aarch64-skyline-switch.dependencies]
-libc-nnsdk = { version = "0.2.0", features = ['rustc-dep-of-std']}
-nnsdk = "0.2.0"
+libc-nnsdk = { version = "0.2.0", features = ['rustc-dep-of-std'] }
+nnsdk = { version = "0.2.0", features = ["rustc-dep-of-std"] }
 
 [features]
 backtrace = [
