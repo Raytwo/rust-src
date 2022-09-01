@@ -15,5 +15,5 @@ doc = false
 alloc = { path = "../alloc" }
 cfg-if = { version = "1.0", features = ['rustc-dep-of-std'] }
 core = { path = "../core" }
-libc-nnsdk = { git = "https://github.com/ultimate-research/libc-nnsdk.git", features = ["rustc-dep-of-std"] }
+libc-nnsdk = { version = "0.2.0", features = ["rustc-dep-of-std"] }
 compiler_builtins = "0.1.0"
