@@ -3,7 +3,7 @@ use crate::ffi::{OsString, CStr, OsStr};
 use crate::os::switch::ffi::OsStrExt;
 use crate::fmt;
 use crate::hash::Hash;
-use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
+use crate::io::{self, IoSlice, IoSliceMut, SeekFrom, BorrowedCursor};
 use crate::path::{Path, PathBuf};
 use crate::sys::time::{SystemTime, UNIX_EPOCH};
 use crate::sys::unsupported;
@@ -62,6 +62,8 @@ pub enum FileType {
 
 #[derive(Debug)]
 pub struct DirBuilder {}
+
+const READ_LIMIT: usize = libc::ssize_t::MAX as usize;
 
 impl Clone for FileAttr {
     fn clone(&self) -> Self {
@@ -482,7 +484,7 @@ impl File {
         }
     }
 
-    pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
         ret_if_null!(self.inner);
         let mut out_size = 0;
         let rc = unsafe {
@@ -490,22 +492,34 @@ impl File {
                 &mut out_size,
                 self.inner,
                 self.pos() as _,
-                buf.unfilled_mut().as_ptr() as _,
-                buf.unfilled_mut().len() as _,
+                cursor.as_mut().as_mut_ptr()  as _,
+                cmp::min(cursor.capacity(), READ_LIMIT) as _,
             )
         };
 
         if rc == 0 {
-            unsafe {
-                buf.assume_init(out_size as usize);
-            }
-            buf.add_filled(out_size as usize);
-            self.pos.fetch_add(out_size, Ordering::SeqCst);
+            unsafe { cursor.advance(out_size as usize) };
             Ok(())
         } else {
             Err(io::Error::from_raw_os_error(rc as _))
         }
     }
+
+    // pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    //     let ret = cvt(unsafe {
+    //         libc::read(
+    //             self.as_raw_fd(),
+    //             cursor.as_mut().as_mut_ptr() as *mut libc::c_void,
+    //             cmp::min(cursor.capacity(), READ_LIMIT),
+    //         )
+    //     })?;
+
+    //     // Safety: `ret` bytes were written to the initialized portion of the buffer
+    //     unsafe {
+    //         cursor.advance(ret as usize);
+    //     }
+    //     Ok(())
+    // }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
         ret_if_null!(self.inner);

@@ -85,7 +85,7 @@ pub mod os_str;
 // }
 
 #[cfg(not(test))]
-pub fn init(_argc: isize, _argv: *const *const u8) {}
+pub fn init(_argc: isize, _argv: *const *const u8, _sigpipe: u8) {}
 
 pub unsafe fn cleanup() {}
 

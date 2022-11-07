@@ -1062,7 +1062,7 @@ macro_rules! impl_is_terminal {
     )*}
 }
 
-impl_is_terminal!(File, Stdin, StdinLock<'_>, Stdout, StdoutLock<'_>, Stderr, StderrLock<'_>);
+// impl_is_terminal!(File, Stdin, StdinLock<'_>, Stdout, StdoutLock<'_>, Stderr, StderrLock<'_>);
 
 #[unstable(
     feature = "print_internals",
