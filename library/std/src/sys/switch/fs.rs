@@ -460,66 +460,13 @@ impl File {
 
     #[inline]
     pub fn is_read_vectored(&self) -> bool {
-        unimplemented!()
-    }
-
-    pub fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        ret_if_null!(self.inner);
-        let mut out_size = 0;
-        let rc = unsafe {
-            nnsdk::fs::ReadFile1(
-                &mut out_size,
-                self.inner,
-                offset as _,
-                buf.as_ptr() as _,
-                buf.len() as _
-            )
-        };
-
-        if rc == 0 {
-            self.pos.fetch_add(out_size, Ordering::SeqCst);
-            Ok(out_size as usize)
-        } else {
-            Err(io::Error::from_raw_os_error(rc as _))
-        }
+        true
     }
 
     pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
         ret_if_null!(self.inner);
-        let mut out_size = 0;
-        let rc = unsafe {
-            nnsdk::fs::ReadFile1(
-                &mut out_size,
-                self.inner,
-                self.pos() as _,
-                cursor.as_mut().as_mut_ptr()  as _,
-                cmp::min(cursor.capacity(), READ_LIMIT) as _,
-            )
-        };
-
-        if rc == 0 {
-            unsafe { cursor.advance(out_size as usize) };
-            Ok(())
-        } else {
-            Err(io::Error::from_raw_os_error(rc as _))
-        }
+        crate::io::default_read_buf(|buf| self.read(buf), cursor)
     }
-
-    // pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
-    //     let ret = cvt(unsafe {
-    //         libc::read(
-    //             self.as_raw_fd(),
-    //             cursor.as_mut().as_mut_ptr() as *mut libc::c_void,
-    //             cmp::min(cursor.capacity(), READ_LIMIT),
-    //         )
-    //     })?;
-
-    //     // Safety: `ret` bytes were written to the initialized portion of the buffer
-    //     unsafe {
-    //         cursor.advance(ret as usize);
-    //     }
-    //     Ok(())
-    // }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
         ret_if_null!(self.inner);
@@ -563,11 +510,7 @@ impl File {
 
     #[inline]
     pub fn is_write_vectored(&self) -> bool {
-        unimplemented!()
-    }
-
-    pub fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        unimplemented!()
+        true
     }
 
     pub fn flush(&self) -> io::Result<()> {
