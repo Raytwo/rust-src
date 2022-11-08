@@ -2411,8 +2411,7 @@ checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 [[package]]
 name = "nnsdk"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f4537c7470ba25f406d42c8cbfe26f64099af4b613e715c6bcb3d25856896c"
+source = "git+https://github.com/ultimate-research/nnsdk-rs#38402a81638f425efb9f59e562324ca36a03d0e6"
 dependencies = [
  "compiler_builtins",
  "libc-nnsdk",

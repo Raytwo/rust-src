@@ -12,6 +12,7 @@ use crate::sync::atomic::{AtomicU64, Ordering};
 use nnsdk::fs::{FileHandle, DirectoryEntry as NinDirEntry};
 use nnsdk::fs::DirectoryEntryType_DirectoryEntryType_Directory as NN_ENTRY_DIR;
 use nnsdk::fs::DirectoryEntryType_DirectoryEntryType_File as NN_ENTRY_FILE;
+use nnsdk::time::PosixTime;
 use crate::ffi::CString;
 
 pub use crate::sys_common::fs::try_exists;
@@ -34,6 +35,9 @@ pub struct FileAttr {
     size: AtomicU64,
     file_type: FileType,
     append: bool,
+    modified: PosixTime,
+    accessed: PosixTime,
+    created: PosixTime,
 }
 
 pub struct ReadDir {
@@ -71,6 +75,9 @@ impl Clone for FileAttr {
             size: AtomicU64::new(self.size.load(Ordering::SeqCst)),
             file_type: self.file_type,
             append: false,
+            modified: self.modified,
+            accessed: self.accessed,
+            created: self.created,
         }
     }
 }
@@ -93,15 +100,17 @@ impl FileAttr {
     }
 
     pub fn modified(&self) -> io::Result<SystemTime> {
-        Ok(UNIX_EPOCH)
+        Ok(SystemTime::from_posixtime(self.modified))
     }
 
     pub fn accessed(&self) -> io::Result<SystemTime> {
-        Ok(UNIX_EPOCH)
+        Ok(SystemTime::from_posixtime(self.accessed))
+
     }
 
     pub fn created(&self) -> io::Result<SystemTime> {
-        Ok(UNIX_EPOCH)
+        Ok(SystemTime::from_posixtime(self.created))
+
     }
 }
 
@@ -182,10 +191,25 @@ impl Iterator for ReadDir {
             _ => panic!("Invalid entry type in directory")
         };
 
+        let c_path = cstr(&path).unwrap();
+
+        let mut out_timestamps = nnsdk::fs::FileTimeStamp {
+            modify: PosixTime { time: 0 },
+            access: PosixTime { time: 0 },
+            create: PosixTime { time: 0 },
+            local_time: false,
+            padding: [0u8;7],
+        };
+
+        unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, c_path.as_ptr() as _); }
+
         let file_attr = FileAttr {
             size: AtomicU64::new(val.fileSize as u64),
             file_type,
             append: false,
+            modified: out_timestamps.modify,
+            accessed: out_timestamps.access,
+            created: out_timestamps.create,
         };
 
         Some(Ok(DirEntry {
@@ -349,12 +373,27 @@ impl File {
             _ => panic!("Invalid entry type in directory")
         };
 
+
         if let FileType::Dir = file_type {
+            let mut out_timestamps = nnsdk::fs::FileTimeStamp {
+                modify: PosixTime { time: 0 },
+                access: PosixTime { time: 0 },
+                create: PosixTime { time: 0 },
+                local_time: false,
+                padding: [0u8;7],
+            };
+    
+            unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, path.as_ptr() as _); }
+
             let attr = FileAttr {
                 size: AtomicU64::new(0),
                 file_type,
                 append: false,
+                modified: out_timestamps.modify,
+                accessed: out_timestamps.access,
+                created: out_timestamps.create
             };
+
             return Ok(File {
                 inner, pos: AtomicU64::new(0), attr
             })
@@ -730,10 +769,23 @@ fn get_entry_type(cstr: &CStr) -> io::Result<FileType> {
 fn stat_internal(cstr: &CStr, size: u64) -> io::Result<FileAttr> {
     let file_type = get_entry_type(cstr)?;
 
+    let mut out_timestamps = nnsdk::fs::FileTimeStamp {
+        modify: PosixTime { time: 0 },
+        access: PosixTime { time: 0 },
+        create: PosixTime { time: 0 },
+        local_time: false,
+        padding: [0u8;7],
+    };
+
+    unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, cstr.as_ptr() as _); }
+
     Ok(FileAttr {
         size: AtomicU64::new(size),
         file_type,
         append: false,
+        modified: out_timestamps.modify,
+        accessed: out_timestamps.access,
+        created: out_timestamps.create,
     })
 }
 
@@ -779,7 +831,17 @@ pub fn stat(path: &Path) -> io::Result<FileAttr> {
         FileType::Dir => Ok(AtomicU64::new(0)),
     };
 
-    Ok(FileAttr { size: size?, file_type, append: false })
+    let mut out_timestamps = nnsdk::fs::FileTimeStamp {
+        modify: PosixTime { time: 0 },
+        access: PosixTime { time: 0 },
+        create: PosixTime { time: 0 },
+        local_time: false,
+        padding: [0u8;7],
+    };
+
+    unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, path.as_ptr() as _); }
+
+    Ok(FileAttr { size: size?, file_type, append: false,  modified: out_timestamps.modify, accessed: out_timestamps.access, created: out_timestamps.create})
     //File::open(path, &OpenOptions::new())?.file_attr()
 }
 
