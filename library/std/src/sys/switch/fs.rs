@@ -777,7 +777,9 @@ fn stat_internal(cstr: &CStr, size: u64) -> io::Result<FileAttr> {
         padding: [0u8;7],
     };
 
-    unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, cstr.as_ptr() as _); }
+    // if file_type == FileType::File {
+    //     unsafe { nnsdk::fs::GetFileTimeStampForDebug(&mut out_timestamps, cstr.as_ptr() as _); }
+    // }
 
     Ok(FileAttr {
         size: AtomicU64::new(size),
