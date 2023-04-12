@@ -204,13 +204,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let mut expected_sig = None;
         let mut expected_kind = None;
 
-        for (pred, span) in traits::elaborate_predicates_with_span(
+        for (pred, span) in traits::elaborate(
             self.tcx,
             // Reverse the obligations here, since `elaborate_*` uses a stack,
             // and we want to keep inference generally in the same order of
             // the registered obligations.
             predicates.rev(),
-        ) {
+        )
+        // We only care about self bounds
+        .filter_only_self()
+        {
             debug!(?pred);
             let bound_predicate = pred.kind();
 

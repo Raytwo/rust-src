@@ -13,8 +13,7 @@ use object::{
 use snap::write::FrameEncoder;
 
 use rustc_data_structures::memmap::Mmap;
-use rustc_data_structures::owning_ref::OwningRef;
-use rustc_data_structures::rustc_erase_owner;
+use rustc_data_structures::owned_slice::try_slice_owned;
 use rustc_data_structures::sync::MetadataRef;
 use rustc_metadata::fs::METADATA_FILENAME;
 use rustc_metadata::EncodedMetadata;
@@ -42,10 +41,10 @@ fn load_metadata_with(
 ) -> Result<MetadataRef, String> {
     let file =
         File::open(path).map_err(|e| format!("failed to open file '{}': {}", path.display(), e))?;
-    let data = unsafe { Mmap::map(file) }
-        .map_err(|e| format!("failed to mmap file '{}': {}", path.display(), e))?;
-    let metadata = OwningRef::new(data).try_map(f)?;
-    return Ok(rustc_erase_owner!(metadata.map_owner_box()));
+
+    unsafe { Mmap::map(file) }
+        .map_err(|e| format!("failed to mmap file '{}': {}", path.display(), e))
+        .and_then(|mmap| try_slice_owned(mmap, |mmap| f(mmap)))
 }
 
 impl MetadataLoader for DefaultMetadataLoader {
@@ -128,6 +127,7 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
         "msp430" => Architecture::Msp430,
         "hexagon" => Architecture::Hexagon,
         "bpf" => Architecture::Bpf,
+        "loongarch64" => Architecture::LoongArch64,
         // Unsupported architecture.
         _ => return None,
     };
@@ -190,6 +190,10 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
                 e_flags |= elf::EF_RISCV_FLOAT_ABI_SOFT;
             }
             e_flags
+        }
+        Architecture::LoongArch64 => {
+            // Source: https://loongson.github.io/LoongArch-Documentation/LoongArch-ELF-ABI-EN.html#_e_flags_identifies_abi_type_and_version
+            elf::EF_LARCH_OBJABI_V1 | elf::EF_LARCH_ABI_DOUBLE_FLOAT
         }
         _ => 0,
     };

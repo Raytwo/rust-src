@@ -1,7 +1,6 @@
 use crate::traits::specialization_graph;
 
-use super::assembly;
-use super::trait_goals::structural_traits;
+use super::assembly::{self, structural_traits};
 use super::EvalCtxt;
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def::DefKind;
@@ -524,6 +523,13 @@ impl<'tcx> assembly::GoalKind<'tcx> for ProjectionPredicate<'tcx> {
         goal: Goal<'tcx, Self>,
     ) -> QueryResult<'tcx> {
         bug!("`Destruct` does not have an associated type: {:?}", goal);
+    }
+
+    fn consider_builtin_transmute_candidate(
+        _ecx: &mut EvalCtxt<'_, 'tcx>,
+        goal: Goal<'tcx, Self>,
+    ) -> QueryResult<'tcx> {
+        bug!("`BikeshedIntrinsicFrom` does not have an associated type: {:?}", goal)
     }
 }
 

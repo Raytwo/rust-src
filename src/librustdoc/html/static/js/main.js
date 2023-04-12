@@ -331,16 +331,6 @@ function preLoadCss(cssUrl) {
         },
     };
 
-    function getPageId() {
-        if (window.location.hash) {
-            const tmp = window.location.hash.replace(/^#/, "");
-            if (tmp.length > 0) {
-                return tmp;
-            }
-        }
-        return null;
-    }
-
     const toggleAllDocsId = "toggle-all-docs";
     let savedHash = "";
 
@@ -361,12 +351,12 @@ function preLoadCss(cssUrl) {
             }
         }
         // This part is used in case an element is not visible.
-        if (savedHash !== window.location.hash) {
-            savedHash = window.location.hash;
-            if (savedHash.length === 0) {
-                return;
+        const pageId = window.location.hash.replace(/^#/, "");
+        if (savedHash !== pageId) {
+            savedHash = pageId;
+            if (pageId !== "") {
+                expandSection(pageId);
             }
-            expandSection(savedHash.slice(1)); // we remove the '#'
         }
     }
 
@@ -705,11 +695,6 @@ function preLoadCss(cssUrl) {
             }
 
         });
-
-        const pageId = getPageId();
-        if (pageId !== null) {
-            expandSection(pageId);
-        }
     }());
 
     window.rustdoc_add_line_numbers_to_examples = () => {

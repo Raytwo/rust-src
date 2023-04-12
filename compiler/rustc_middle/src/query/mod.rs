@@ -7,6 +7,7 @@
 use crate::ty::{self, print::describe_as_module, TyCtxt};
 use rustc_span::def_id::LOCAL_CRATE;
 
+pub mod erase;
 mod keys;
 pub use keys::{AsLocalKey, Key, LocalCrate};
 
@@ -626,14 +627,20 @@ rustc_queries! {
         separate_provide_extern
     }
 
+    query implied_predicates_of(key: DefId) -> ty::GenericPredicates<'tcx> {
+        desc { |tcx| "computing the implied predicates of `{}`", tcx.def_path_str(key) }
+        cache_on_disk_if { key.is_local() }
+        separate_provide_extern
+    }
+
     /// The `Option<Ident>` is the name of an associated type. If it is `None`, then this query
     /// returns the full set of predicates. If `Some<Ident>`, then the query returns only the
     /// subset of super-predicates that reference traits that define the given associated type.
     /// This is used to avoid cycles in resolving types like `T::Item`.
-    query super_predicates_that_define_assoc_type(key: (DefId, Option<rustc_span::symbol::Ident>)) -> ty::GenericPredicates<'tcx> {
-        desc { |tcx| "computing the super traits of `{}`{}",
+    query super_predicates_that_define_assoc_type(key: (DefId, rustc_span::symbol::Ident)) -> ty::GenericPredicates<'tcx> {
+        desc { |tcx| "computing the super traits of `{}` with associated type name `{}`",
             tcx.def_path_str(key.0),
-            if let Some(assoc_name) = key.1 { format!(" with associated type name `{}`", assoc_name) } else { "".to_string() },
+            key.1
         }
     }
 
@@ -1114,9 +1121,9 @@ rustc_queries! {
         desc { "converting literal to mir constant" }
     }
 
-    query check_match(key: DefId) {
-        desc { |tcx| "match-checking `{}`", tcx.def_path_str(key) }
-        cache_on_disk_if { key.is_local() }
+    query check_match(key: LocalDefId) {
+        desc { |tcx| "match-checking `{}`", tcx.def_path_str(key.to_def_id()) }
+        cache_on_disk_if { true }
     }
 
     /// Performs part of the privacy check and computes effective visibilities.
@@ -1509,7 +1516,7 @@ rustc_queries! {
         desc { "getting traits in scope at a block" }
     }
 
-    query module_reexports(def_id: LocalDefId) -> Option<&'tcx [ModChild]> {
+    query module_reexports(def_id: LocalDefId) -> &'tcx [ModChild] {
         desc { |tcx| "looking up reexports of module `{}`", tcx.def_path_str(def_id.to_def_id()) }
     }
 

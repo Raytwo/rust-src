@@ -207,5 +207,19 @@ resolve_expected_found =
 resolve_indeterminate =
     cannot determine resolution for the visibility
 
+resolve_tool_module_imported =
+    cannot use a tool module through an import
+    .note = the tool module imported here
+
 resolve_module_only =
     visibility must resolve to a module
+
+resolve_macro_expected_found =
+    expected {$expected}, found {$found} `{$macro_path}`
+
+resolve_remove_surrounding_derive =
+    remove from the surrounding `derive()`
+
+resolve_add_as_non_derive =
+    add as non-Derive macro
+    `#[{$macro_path}]`

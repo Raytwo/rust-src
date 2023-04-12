@@ -33,9 +33,9 @@ use rustc_middle::infer::unify_key::{ConstVariableOrigin, ConstVariableOriginKin
 use rustc_middle::middle::stability::AllowUnstable;
 use rustc_middle::ty::fold::FnMutDelegate;
 use rustc_middle::ty::subst::{self, GenericArgKind, InternalSubsts, SubstsRef};
-use rustc_middle::ty::DynKind;
 use rustc_middle::ty::GenericParamDefKind;
 use rustc_middle::ty::{self, Const, IsSuggestable, Ty, TyCtxt, TypeVisitableExt};
+use rustc_middle::ty::{DynKind, ToPredicate};
 use rustc_session::lint::builtin::{AMBIGUOUS_ASSOCIATED_ITEMS, BARE_TRAIT_OBJECTS};
 use rustc_span::edit_distance::find_best_match_for_name;
 use rustc_span::edition::Edition;
@@ -1526,8 +1526,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         for (base_trait_ref, span, constness) in regular_traits_refs_spans {
             assert_eq!(constness, ty::BoundConstness::NotConst);
-
-            for pred in traits::elaborate_trait_ref(tcx, base_trait_ref) {
+            let base_pred: ty::Predicate<'tcx> = base_trait_ref.to_predicate(tcx);
+            for pred in traits::elaborate(tcx, [base_pred]) {
                 debug!("conv_object_ty_poly_trait_ref: observing object predicate `{:?}`", pred);
 
                 let bound_predicate = pred.kind();
@@ -1663,39 +1663,45 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             })
         });
 
-        let existential_projections = projection_bounds.iter().map(|(bound, _)| {
-            bound.map_bound(|mut b| {
-                assert_eq!(b.projection_ty.self_ty(), dummy_self);
+        let existential_projections = projection_bounds
+            .iter()
+            // We filter out traits that don't have `Self` as their self type above,
+            // we need to do the same for projections.
+            .filter(|(bound, _)| bound.skip_binder().self_ty() == dummy_self)
+            .map(|(bound, _)| {
+                bound.map_bound(|mut b| {
+                    assert_eq!(b.projection_ty.self_ty(), dummy_self);
 
-                // Like for trait refs, verify that `dummy_self` did not leak inside default type
-                // parameters.
-                let references_self = b.projection_ty.substs.iter().skip(1).any(|arg| {
-                    if arg.walk().any(|arg| arg == dummy_self.into()) {
-                        return true;
+                    // Like for trait refs, verify that `dummy_self` did not leak inside default type
+                    // parameters.
+                    let references_self = b.projection_ty.substs.iter().skip(1).any(|arg| {
+                        if arg.walk().any(|arg| arg == dummy_self.into()) {
+                            return true;
+                        }
+                        false
+                    });
+                    if references_self {
+                        let guar = tcx.sess.delay_span_bug(
+                            span,
+                            "trait object projection bounds reference `Self`",
+                        );
+                        let substs: Vec<_> = b
+                            .projection_ty
+                            .substs
+                            .iter()
+                            .map(|arg| {
+                                if arg.walk().any(|arg| arg == dummy_self.into()) {
+                                    return tcx.ty_error(guar).into();
+                                }
+                                arg
+                            })
+                            .collect();
+                        b.projection_ty.substs = tcx.mk_substs(&substs);
                     }
-                    false
-                });
-                if references_self {
-                    let guar = tcx
-                        .sess
-                        .delay_span_bug(span, "trait object projection bounds reference `Self`");
-                    let substs: Vec<_> = b
-                        .projection_ty
-                        .substs
-                        .iter()
-                        .map(|arg| {
-                            if arg.walk().any(|arg| arg == dummy_self.into()) {
-                                return tcx.ty_error(guar).into();
-                            }
-                            arg
-                        })
-                        .collect();
-                    b.projection_ty.substs = tcx.mk_substs(&substs);
-                }
 
-                ty::ExistentialProjection::erase_self_ty(tcx, b)
-            })
-        });
+                    ty::ExistentialProjection::erase_self_ty(tcx, b)
+                })
+            });
 
         let regular_trait_predicates = existential_trait_refs
             .map(|trait_ref| trait_ref.map_bound(ty::ExistentialPredicate::Trait));
@@ -2336,10 +2342,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 FnMutDelegate {
                     regions: &mut |_| tcx.lifetimes.re_erased,
                     types: &mut |bv| {
-                        tcx.mk_placeholder(ty::PlaceholderType { universe, name: bv.kind })
+                        tcx.mk_placeholder(ty::PlaceholderType { universe, bound: bv })
                     },
                     consts: &mut |bv, ty| {
-                        tcx.mk_const(ty::PlaceholderConst { universe, name: bv }, ty)
+                        tcx.mk_const(ty::PlaceholderConst { universe, bound: bv }, ty)
                     },
                 },
             );
@@ -2525,11 +2531,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                                             regions: &mut |_| tcx.lifetimes.re_erased,
                                             types: &mut |bv| tcx.mk_placeholder(ty::PlaceholderType {
                                                 universe,
-                                                name: bv.kind,
+                                                bound: bv,
                                             }),
                                             consts: &mut |bv, ty| tcx.mk_const(ty::PlaceholderConst {
                                                 universe,
-                                                name: bv
+                                                bound: bv,
                                             }, ty),
                                         })
                                     )
@@ -2580,7 +2586,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 tcx.all_impls(trait_def_id)
                     .filter(|impl_def_id| {
                         // Consider only accessible traits
-                        tcx.visibility(*impl_def_id).is_accessible_from(self.item_def_id(), tcx)
+                        tcx.visibility(trait_def_id).is_accessible_from(self.item_def_id(), tcx)
                             && tcx.impl_polarity(impl_def_id) != ty::ImplPolarity::Negative
                     })
                     .filter_map(|impl_def_id| tcx.impl_trait_ref(impl_def_id))
