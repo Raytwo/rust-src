@@ -145,7 +145,8 @@ mod c_char_definition {
             ),
             all(target_os = "fuchsia", target_arch = "aarch64"),
             all(target_os = "nto", target_arch = "aarch64"),
-            target_os = "horizon"
+            target_os = "horizon",
+            target_os = "switch",
         ))] {
             pub type c_char = u8;
             pub type NonZero_c_char = crate::num::NonZeroU8;
