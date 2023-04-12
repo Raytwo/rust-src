@@ -50,14 +50,14 @@ impl Condvar {
     }
 
     #[inline]
-    pub unsafe fn notify_one(&self) {
-        let r = libc::pthread_cond_signal(self.inner.get());
+    pub fn notify_one(&self) {
+        let r = unsafe { libc::pthread_cond_signal(self.inner.get()) };
         debug_assert_eq!(r, 0);
     }
 
     #[inline]
-    pub unsafe fn notify_all(&self) {
-        let r = libc::pthread_cond_broadcast(self.inner.get());
+    pub fn notify_all(&self) {
+        let r = unsafe { libc::pthread_cond_broadcast(self.inner.get()) };
         debug_assert_eq!(r, 0);
     }
 
