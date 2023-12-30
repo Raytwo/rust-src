@@ -23,7 +23,7 @@ pub const MAIN_SEP: char = '/';
 
 pub(crate) fn absolute(path: &Path) -> io::Result<PathBuf> {
     let mut components = path.components();
-    let path_os = path.as_os_str().bytes();
+    let path_os = path.as_os_str().as_encoded_bytes();
 
     let mut normalized = if path.is_absolute() {
         PathBuf::new()

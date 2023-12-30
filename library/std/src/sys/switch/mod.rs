@@ -63,6 +63,7 @@ pub mod thread;
 pub mod thread_local;
 pub mod thread_local_key;
 pub mod time;
+pub mod thread_parking;
 
 pub mod fd;
 
@@ -100,6 +101,11 @@ pub fn unsupported_err() -> crate::io::Error {
 
 pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
     crate::io::ErrorKind::Other
+}
+
+#[inline]
+pub(crate) fn is_interrupted(errno: i32) -> bool {
+    errno == libc::EINTR
 }
 
 // This enum is used as the storage for a bunch of types which can't actually

@@ -101,21 +101,34 @@ impl From<File> for Stdio {
     }
 }
 
+impl From<io::Stdout> for Stdio {
+    fn from(_: io::Stdout) -> Stdio {
+        Stdio::Null
+    }
+}
+
+impl From<io::Stderr> for Stdio {
+    fn from(_: io::Stderr) -> Stdio {
+        Stdio::Null
+    }
+}
+
 impl fmt::Debug for Command {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
-pub struct ExitStatus(Void);
+#[derive(Copy, Default)]
+pub struct ExitStatus(c_int);
 
 impl ExitStatus {
     pub fn success(&self) -> bool {
-        match self.0 {}
+        unreachable!()
     }
 
     pub fn code(&self) -> Option<i32> {
-        match self.0 {}
+        None
     }
 
     #[allow(unreachable_code)]
@@ -135,15 +148,13 @@ impl ExitStatus {
 
 impl Clone for ExitStatus {
     fn clone(&self) -> ExitStatus {
-        match self.0 {}
+        unreachable!()
     }
 }
 
-impl Copy for ExitStatus {}
-
 impl PartialEq for ExitStatus {
     fn eq(&self, _other: &ExitStatus) -> bool {
-        match self.0 {}
+        unreachable!()
     }
 }
 
@@ -151,13 +162,13 @@ impl Eq for ExitStatus {}
 
 impl fmt::Debug for ExitStatus {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+        unreachable!()
     }
 }
 
 impl fmt::Display for ExitStatus {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {}
+        unreachable!()
     }
 }
 

@@ -78,6 +78,18 @@ impl Iterator for Env {
     }
 }
 
+impl Env {
+    pub fn str_debug(&self) -> impl fmt::Debug + '_ {
+        "not supported on switch yet"
+    }
+}
+
+impl fmt::Debug for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        "not supported on switch yet".fmt(f)
+    }
+}
+
 pub fn env() -> Env {
     panic!("not supported on web assembly")
 }

@@ -116,6 +116,16 @@ impl AsInner<[u8]> for Buf {
 }
 
 impl Buf {
+    #[inline]
+    pub fn into_encoded_bytes(self) -> Vec<u8> {
+        self.inner
+    }
+
+    #[inline]
+    pub unsafe fn from_encoded_bytes_unchecked(s: Vec<u8>) -> Self {
+        Self { inner: s }
+    }
+
     pub fn from_string(s: String) -> Buf {
         Buf { inner: s.into_bytes() }
     }
@@ -213,17 +223,27 @@ impl Buf {
 
 impl Slice {
     #[inline]
+    pub fn as_encoded_bytes(&self) -> &[u8] {
+        &self.inner
+    }
+
+    #[inline]
+    pub unsafe fn from_encoded_bytes_unchecked(s: &[u8]) -> &Slice {
+        unsafe { mem::transmute(s) }
+    }
+
+    #[inline]
     fn from_u8_slice(s: &[u8]) -> &Slice {
         unsafe { mem::transmute(s) }
     }
 
     #[inline]
     pub fn from_str(s: &str) -> &Slice {
-        Slice::from_u8_slice(s.as_bytes())
+        unsafe { Slice::from_encoded_bytes_unchecked(s.as_bytes()) }
     }
 
-    pub fn to_str(&self) -> Option<&str> {
-        str::from_utf8(&self.inner).ok()
+    pub fn to_str(&self) -> Result<&str, crate::str::Utf8Error> {
+        str::from_utf8(&self.inner)
     }
 
     pub fn to_string_lossy(&self) -> Cow<'_, str> {
