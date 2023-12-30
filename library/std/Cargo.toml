@@ -17,7 +17,7 @@ cfg-if = { version = "1.0", features = ['rustc-dep-of-std'] }
 panic_unwind = { path = "../panic_unwind", optional = true }
 panic_abort = { path = "../panic_abort" }
 core = { path = "../core", public = true }
-libc = { version = "0.2.150", default-features = false, features = ['rustc-dep-of-std'], public = true }
+#libc = { version = "0.2.140", default-features = false, features = ['rustc-dep-of-std'] }
 compiler_builtins = { version = "0.1.103" }
 profiler_builtins = { path = "../profiler_builtins", optional = true }
 unwind = { path = "../unwind" }
@@ -56,6 +56,10 @@ wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features =
 [target.'cfg(target_os = "uefi")'.dependencies]
 r-efi = { version = "4.2.0", features = ['rustc-dep-of-std']}
 r-efi-alloc = { version = "1.0.0", features = ['rustc-dep-of-std']}
+
+[target.aarch64-skyline-switch.dependencies]
+libc-nnsdk = { git = "https://github.com/ultimate-research/libc-nnsdk", features = ['rustc-dep-of-std'] }
+nnsdk = { git = "https://github.com/ultimate-research/nnsdk-rs", features = ["rustc-dep-of-std"] }
 
 [features]
 backtrace = [
