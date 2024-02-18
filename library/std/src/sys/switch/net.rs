@@ -206,7 +206,9 @@ impl Socket {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        self.0.read(buf)
+        let mut buf = BorrowedBuf::from(buf);
+        self.recv_with_flags(buf.unfilled(), 0)?;
+        Ok(buf.len())
     }
 
     pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
