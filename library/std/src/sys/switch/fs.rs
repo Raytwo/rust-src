@@ -284,7 +284,7 @@ unsafe impl Send for File {}
 
 impl crate::ops::Drop for File {
     fn drop(&mut self) {
-        if self.inner.handle.is_null() {
+        if self.inner.handle == 0 {
             return;
         }
         unsafe {
@@ -305,7 +305,7 @@ fn cstr(path: &Path) -> io::Result<CString> {
 
 macro_rules! ret_if_null {
     ($expr:expr) => {
-        if ($expr.handle).is_null() {
+        if ($expr.handle) == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Cannot treat directory as file"
@@ -365,7 +365,7 @@ impl File {
             )?;
         }
 
-        if inner.handle.is_null() {
+        if inner.handle == 0 {
             Err(io::Error::new(io::ErrorKind::NotFound, "Returned file handle was null"))
         } else {
             let mut filesize = 0;
@@ -597,7 +597,7 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
     let path_buf = path.to_path_buf();
     let path = cstr(path)?;
 
-    let mut dir_handle = nnsdk::fs::DirectoryHandle { handle: 0 as *mut _ };
+    let mut dir_handle = nnsdk::fs::DirectoryHandle { handle: 0 };
     let mut count: i64 = 0;
 
     unsafe {
@@ -748,7 +748,7 @@ pub fn stat(path: &Path) -> io::Result<FileAttr> {
 
                 let mut filesize = 0;
                 
-                if inner.handle.is_null() {
+                if inner.handle == 0 {
                     return Err(io::Error::new(io::ErrorKind::NotFound, "Returned file handle was null"));
                 } else {
                     r_try!(nnsdk::fs::GetFileSize(&mut filesize, inner))?;
