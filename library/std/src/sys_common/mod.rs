@@ -32,7 +32,8 @@ cfg_if::cfg_if! {
         windows,
         target_os = "hermit",
         target_os = "solid_asp3",
-        all(target_os = "wasi", target_env = "p2")
+        all(target_os = "wasi", target_env = "p2"),
+        target_os = "switch"
     ))] {
         pub mod net;
     } else {

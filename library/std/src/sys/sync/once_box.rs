@@ -16,6 +16,7 @@ pub(crate) struct OnceBox<T> {
 
 impl<T> OnceBox<T> {
     #[inline]
+    #[rustc_const_stable(feature = "const_locks", since = "1.63.0")]
     pub const fn new() -> Self {
         Self { ptr: AtomicPtr::new(null_mut()) }
     }

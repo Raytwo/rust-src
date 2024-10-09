@@ -208,7 +208,7 @@ impl<'a> TryFrom<(&'a str, u16)> for LookupHost {
             hints.ai_socktype = c::SOCK_STREAM;
             let mut res = ptr::null_mut();
             unsafe {
-                cvt_gai(c::getaddrinfo(c_host.as_ptr(), ptr::null(), &hints, &mut res))
+                cvt_gai(c::getaddrinfo(c_host.as_ptr() as *const u8, ptr::null(), &hints, &mut res))
                     .map(|_| LookupHost { original: res, cur: res, port })
             }
         })

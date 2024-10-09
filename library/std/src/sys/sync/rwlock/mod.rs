@@ -17,6 +17,7 @@ cfg_if::cfg_if! {
         all(target_os = "windows", target_vendor = "win7"),
         all(target_vendor = "fortanix", target_env = "sgx"),
         target_os = "xous",
+        target_os = "queue",
     ))] {
         mod queue;
         pub use queue::RwLock;

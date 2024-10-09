@@ -159,6 +159,8 @@ pub mod vita;
 pub mod vxworks;
 #[cfg(target_os = "xous")]
 pub mod xous;
+#[cfg(target_os = "switch")]
+pub mod switch;
 
 #[cfg(any(unix, target_os = "hermit", target_os = "wasi", doc))]
 pub mod fd;

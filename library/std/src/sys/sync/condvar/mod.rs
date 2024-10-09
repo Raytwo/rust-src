@@ -18,6 +18,9 @@ cfg_if::cfg_if! {
     ))] {
         mod pthread;
         pub use pthread::Condvar;
+    }  else if #[cfg(target_os = "switch")] {
+        mod pthread_switch;
+        pub use pthread_switch::Condvar;
     } else if #[cfg(all(target_os = "windows", target_vendor = "win7"))] {
         mod windows7;
         pub use windows7::Condvar;

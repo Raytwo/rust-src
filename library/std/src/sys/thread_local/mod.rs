@@ -135,6 +135,7 @@ pub(crate) mod key {
                 target_family = "unix",
             ),
             target_os = "teeos",
+            target_os = "switch",
         ))] {
             mod racy;
             mod unix;
