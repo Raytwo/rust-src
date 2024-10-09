@@ -52,7 +52,6 @@ pub mod io;
 pub mod memchr;
 pub mod net;
 pub mod os;
-pub mod path;
 pub mod pipe;
 pub mod process;
 pub mod stdio;
