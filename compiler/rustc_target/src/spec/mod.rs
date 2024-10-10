@@ -1909,6 +1909,7 @@ supported_targets! {
 
     ("armv6k-nintendo-3ds", armv6k_nintendo_3ds),
 
+    ("aarch64-skyline-switch", aarch64_skyline_switch),
     ("aarch64-nintendo-switch-freestanding", aarch64_nintendo_switch_freestanding),
 
     ("armv7-sony-vita-newlibeabihf", armv7_sony_vita_newlibeabihf),
