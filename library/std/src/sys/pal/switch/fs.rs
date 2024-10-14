@@ -9,6 +9,7 @@ use crate::sys::time::{SystemTime, UNIX_EPOCH};
 use crate::sys::unsupported;
 use crate::sync::atomic::{AtomicU64, Ordering};
 pub use crate::sys_common::fs::exists;
+use crate::sys::cvt;
 
 use nnsdk::fs::{FileHandle, DirectoryEntry as NinDirEntry};
 use nnsdk::fs::DirectoryEntryType_DirectoryEntryType_Directory as NN_ENTRY_DIR;
@@ -421,9 +422,9 @@ impl File {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        ret_if_null!(self.inner);
         let mut out_size = 0;
-        let rc = unsafe {
+
+        cvt(unsafe {
             nnsdk::fs::ReadFile1(
                 &mut out_size,
                 self.inner,
@@ -431,36 +432,25 @@ impl File {
                 buf.as_ptr() as _,
                 buf.len() as _
             )
-        };
+        } as i32)?;
 
-        if rc == 0 {
-            self.pos.fetch_add(out_size, Ordering::SeqCst);
-            Ok(out_size as usize)
-        } else {
-            Err(io::Error::from_raw_os_error(rc as _))
-        }
+        // Needed to keep track of the position in the file
+        self.pos.fetch_add(out_size as u64, Ordering::SeqCst);
+
+        Ok(out_size as usize)
     }
 
     pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        let mut read = 0;
-        for mut buf in bufs {
-            let amt = self.read(&mut buf)?;
-            read += amt;
-            if amt != buf.len() {
-                break
-            }
-        }
-        Ok(read)
+        io::default_read_vectored(|b| self.read(b), bufs)
     }
 
     #[inline]
     pub fn is_read_vectored(&self) -> bool {
-        true
+        false
     }
 
     pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
-        ret_if_null!(self.inner);
-        crate::io::default_read_buf(|buf| self.read(buf), cursor)
+        io::default_read_buf(|b| self.read(b), cursor)
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
@@ -492,20 +482,12 @@ impl File {
     }
 
     pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        let mut written = 0;
-        for buf in bufs {
-            let amt = self.write(&buf)?;
-            written += amt;
-            if amt != buf.len() {
-                break
-            }
-        }
-        Ok(written)
+        io::default_write_vectored(|b| self.write(b), bufs)
     }
 
     #[inline]
     pub fn is_write_vectored(&self) -> bool {
-        true
+        false
     }
 
     pub fn flush(&self) -> io::Result<()> {
