@@ -110,6 +110,7 @@ impl Parker {
                 target_os = "redox",
                 target_os = "vita",
                 target_vendor = "apple",
+                target_os = "switch",
             ))] {
                 (&raw mut (*parker).cvar).write(UnsafeCell::new(libc::PTHREAD_COND_INITIALIZER));
             } else if #[cfg(any(target_os = "espidf", target_os = "horizon"))] {

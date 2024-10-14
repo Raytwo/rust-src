@@ -45,7 +45,6 @@ use crate::io::ErrorKind;
 
 pub mod alloc;
 pub mod args;
-pub mod cmath;
 pub mod env;
 pub mod fs;
 pub mod io;
@@ -57,7 +56,6 @@ pub mod process;
 pub mod stdio;
 pub mod thread;
 pub mod time;
-pub mod thread_parking;
 
 pub mod fd;
 

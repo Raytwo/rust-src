@@ -18,6 +18,7 @@ cfg_if::cfg_if! {
         all(target_vendor = "fortanix", target_env = "sgx"),
         target_os = "xous",
         target_os = "queue",
+        target_os = "switch",
     ))] {
         mod queue;
         pub use queue::RwLock;

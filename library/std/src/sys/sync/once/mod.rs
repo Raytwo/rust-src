@@ -27,6 +27,7 @@ cfg_if::cfg_if! {
         all(target_vendor = "fortanix", target_env = "sgx"),
         target_os = "solid_asp3",
         target_os = "xous",
+        target_os = "switch"
     ))] {
         mod queue;
         pub use queue::{Once, OnceState};
